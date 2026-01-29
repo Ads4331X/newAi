@@ -2,6 +2,7 @@ from ollama import chat, ChatResponse
 import json
 import system_commands 
 import update_commands
+import power_commands
 
 
 #read conversatoin_history.json file
@@ -9,6 +10,7 @@ with open("backend/data/conversation_history.json" , "r") as data:
   history = json.load(data)
 
 user_prompt = ""
+powerComands = ["SHUTDOWN", "RESTART", "SUSPEND", "SLEEP", "LOGOUT", "LOCK", "REBOOT"]
 hasOpen = False  
 hasUpdate = False
 exit = {
@@ -24,6 +26,10 @@ def getResponse():
   user_prompt = input("Enter a Prompt: ").upper()
 
   while user_prompt not in exit.keys() : 
+    if user_prompt in powerComands:
+      power_commands.power_commands(user_prompt)
+      break
+
     messages = [*history, {"role": "user", "content": user_prompt}]
     
     if "UPDATE" in user_prompt:   
