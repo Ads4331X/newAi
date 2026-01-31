@@ -43,7 +43,7 @@ def getResponse():
                                       system/all → sudo apt update && sudo apt upgrade -y
                                       Return command for: {applicationName}"""})
     
-    if "OPEN" in user_prompt:   
+    elif "OPEN" in user_prompt:   
       applicationName = " ".join(user_prompt.split()[user_prompt.split().index("OPEN") + 1:])
       hasOpen = True
       messages.append({"role": "system",
@@ -63,9 +63,14 @@ def getResponse():
                                     nautilus
 
                                     Your response (command only):"""})
+    else:
+      messages.append(  {
+    "role": "system",
+    "content": "You are an Ubuntu assistant. Only give instructions relevant to Ubuntu/Linux. Ignore instructions about Windows or Mac. Explain step by step in simple language and proactively suggest what the user might need next."
+  })
     
     response: ChatResponse = chat(model='qwen2.5:1.5b', messages=messages)  
-    
+    print(response.message.content)
     if hasOpen:  
       system_commands.system_commands(response.message.content)
       hasOpen = False
@@ -83,4 +88,4 @@ def getResponse():
     print("Enter Exit/Quit/E to exit\n")  
     user_prompt = input("Enter a Prompt: ").upper()  
 
-getResponse()
+getResponse() 
