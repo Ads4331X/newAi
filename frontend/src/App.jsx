@@ -24,7 +24,6 @@ function App() {
             display: "flex",
             justifyContent: "space-around",
             alignItems: "center",
-            WebkitAppRegion: "drag",
             cursor: "grab",
             "&:active": {
               cursor: "grabbing",
@@ -39,14 +38,35 @@ function App() {
               WebkitAppRegion: "no-drag",
             }}
           />
-          <ZoomOutMapIcon
-            fontSize="large"
+          <Box
             sx={{
               WebkitAppRegion: "drag",
               cursor: "grab",
-              color: "white",
+              display: "inline-flex",
+              position: "relative",
+              "& svg": {
+                fill: "url(#gradient1)",
+              },
             }}
-          />
+          >
+            <svg width="0" height="0">
+              <defs>
+                <linearGradient
+                  id="gradient1"
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  <stop offset="0%" stopColor="#ff0080" />
+                  <stop offset="33%" stopColor="#ff8c00" />
+                  <stop offset="66%" stopColor="#40e0d0" />
+                  <stop offset="100%" stopColor="#8a2be2" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <ZoomOutMapIcon fontSize="large" />
+          </Box>
         </Box>
 
         <Box sx={{ WebkitAppRegion: "no-drag" }}>
