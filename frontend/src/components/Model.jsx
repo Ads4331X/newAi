@@ -8,13 +8,15 @@ export function Model() {
   const containerRef = useRef(null);
 
   useEffect(() => {
-    const app = new PIXI.Application({
-      backgroundAlpha: 0,
-      autoDensity: true,
-      resolution: window.devicePixelRatio || 1,
-      antialias: true,
-      eventMode: "static", // ADD THIS - enables events
-    });
+  const app = new PIXI.Application({
+  backgroundAlpha: 0,
+  autoDensity: true,
+  resolution: window.devicePixelRatio || 1,
+  antialias: true,
+  eventMode: "static",
+});
+
+app.ticker.maxFPS = 30;
 
     if (containerRef.current) {
       containerRef.current.appendChild(app.view);

@@ -23,9 +23,6 @@ function createWindow() {
 
   // CRITICAL: Don't ignore mouse events!
   mainWindow.setIgnoreMouseEvents(false);
-
-  // Enable dev tools to debug
-  mainWindow.webContents.openDevTools();
 }
 
 ipcMain.on("resize-window", (event, width, height) => {
