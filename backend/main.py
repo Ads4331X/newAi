@@ -1,36 +1,43 @@
 from ollama import chat, ChatResponse
 import json
+import sys
+import os
 import system_commands 
 import update_commands
 import power_commands
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+history_path = os.path.join(BASE_DIR, "data", "conversation_history.json")
 #read conversatoin_history.json file
-with open("backend/data/conversation_history.json" , "r") as data:
+with open(history_path, "r") as data:
   history = json.load(data)
 
-user_prompt = ""
 powerComands = ["SHUTDOWN", "RESTART", "SUSPEND", "SLEEP", "LOGOUT", "LOCK", "REBOOT"]
-hasOpen = False  
-hasUpdate = False
-exit = {
-  "QUIT": True,
-  "EXIT": True,
-  "Q": True,
-  "E": True,
-}
-def getResponse():
-  global user_prompt
-  global hasOpen
-  global hasUpdate
-  user_prompt = input("Enter a Prompt: ").upper()
 
-  while user_prompt not in exit.keys() : 
+for line in sys.stdin:
+    user_prompt = line.strip().upper()
+    
+    if not user_prompt:
+        continue
+    
+    # Check for exit
+    if user_prompt in ["QUIT", "EXIT", "Q", "E"]:
+        print("Exiting...", flush=True)
+        break
+    
+    # Check for power commands
+    if user_prompt in powerComands:
+        power_commands.power_commands(user_prompt)
+        print("Power command executed", flush=True)
+        continue
+
     if user_prompt in powerComands:
       power_commands.power_commands(user_prompt)
-      break
 
     messages = [*history, {"role": "user", "content": user_prompt}]
+    hasOpen = False  
+    hasUpdate = False
     
     if "UPDATE" in user_prompt:   
       applicationName = " ".join(user_prompt.split()[user_prompt.split().index("UPDATE") + 1:])
@@ -70,7 +77,8 @@ def getResponse():
   })
     
     response: ChatResponse = chat(model='qwen2.5:1.5b', messages=messages)  
-    print(response.message.content)
+    print(f"AI: {response.message.content}", flush=True)
+
     if hasOpen:  
       system_commands.system_commands(response.message.content)
       hasOpen = False
@@ -82,10 +90,7 @@ def getResponse():
     history.append({'role': 'user', 'content': user_prompt})  
     history.append({'role': 'assistant', 'content': response.message.content})
     
-    with open("backend/data/conversation_history.json" , "w") as data:  
+    with open(history_path , "w") as data:  
       json.dump(history, data)
 
-    print("Enter Exit/Quit/E to exit\n")  
-    user_prompt = input("Enter a Prompt: ").upper()  
 
-getResponse() 
