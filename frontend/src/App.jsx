@@ -13,7 +13,9 @@ function App() {
   useEffect(() => {
     if (window.electron?.ipcRenderer) {
       window.electron.ipcRenderer.on("python-response", (event, message) => {
-        setResponse((prev) => prev + message + " \n "); // replace instead of append
+        setResponse((prev) =>
+          prev ? prev + message + " \n " : message + " \n ",
+        );
         setLoading(false);
       });
     }

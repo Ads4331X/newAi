@@ -14,10 +14,13 @@ export function ResponseBox({ response }) {
         textAlign: "left",
         whiteSpace: "pre-wrap",
         "& h1, & h2, & h3, & h4, & h5, & h6": {
-          margin: "0.5em 0",
+          margin: "0.5em 1em -0.6em ",
+        },
+        "& li": {
+          margin: "-2em -0.6em 2em -0.6em",
         },
         "& p": {
-          margin: "-1em 0",
+          margin: "-0.1em 0",
         },
       }}
     >
