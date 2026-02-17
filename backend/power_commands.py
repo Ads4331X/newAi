@@ -1,19 +1,15 @@
 import subprocess
 
-
 def power_commands(command):
-    powerCommands = {
-        "SHUTDOWN": "poweroff",
-        "Restart": "reboot",
-        "Suspend": "systemctl suspend",
-         "SLEEP": "systemctl suspend",
-        "LOGOUT": "gnome-session-quit --logout",
-        "LOCK": "gnome-screensaver-command -l",
+    commands = {
+        "SHUTDOWN": "shutdown now",
+        "RESTART": "reboot",
         "REBOOT": "reboot",
+        "SUSPEND": "systemctl suspend",
+        "SLEEP": "systemctl suspend",
+        "LOGOUT": "gnome-session-quit --logout --no-prompt",
+        "LOCK": "gnome-screensaver-command -l"
     }
-
-    cmd = powerCommands.get(command.upper())  # .get() returns None if not found
-    if cmd:
-        subprocess.run(cmd, shell=True)  # shell=True for commands with spaces
-    else:
-        print(f"Unknown power command: {command}")
+    
+    if command in commands:
+        subprocess.run(commands[command], shell=True)

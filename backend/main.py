@@ -2,95 +2,127 @@ from ollama import chat, ChatResponse
 import json
 import sys
 import os
-import system_commands 
-import update_commands
+import time
+import pyttsx3
+import system_commands
 import power_commands
 
+engine = pyttsx3.init()
+engine.setProperty('rate', 150)
+engine.setProperty('volume', 1.0)
+voices = engine.getProperty('voices')
+if len(voices) > 1:
+    engine.setProperty('voice', voices[1].id)
+else:
+    engine.setProperty('voice', voices[0].id)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 history_path = os.path.join(BASE_DIR, "data", "conversation_history.json")
-#read conversatoin_history.json file
+
 with open(history_path, "r") as data:
-  history = json.load(data)
+    history = json.load(data)
 
 powerComands = ["SHUTDOWN", "RESTART", "SUSPEND", "SLEEP", "LOGOUT", "LOCK", "REBOOT"]
 
 for line in sys.stdin:
-    user_prompt = line.strip().upper()
-    
+    user_prompt = line.strip()
+
     if not user_prompt:
         continue
-    
-    # Check for exit
-    if user_prompt in ["QUIT", "EXIT", "Q", "E"]:
+
+    if user_prompt.upper() in ["QUIT", "EXIT", "Q", "E"]:
         print("Exiting...", flush=True)
         break
-    
-    # Check for power commands
-    if user_prompt in powerComands:
-        power_commands.power_commands(user_prompt)
+
+    if user_prompt.upper() in powerComands:
+        power_commands.power_commands(user_prompt.upper())
         print("Power command executed", flush=True)
         continue
 
-    if user_prompt in powerComands:
-      power_commands.power_commands(user_prompt)
+    recent_history = history[-6:] if len(history) > 6 else history
 
-    messages = [*history, {"role": "user", "content": user_prompt}]
-    hasOpen = False  
-    hasUpdate = False
-    
-    if "UPDATE" in user_prompt:   
-      applicationName = " ".join(user_prompt.split()[user_prompt.split().index("UPDATE") + 1:])
-      hasUpdate = True
-      messages.append({"role": "system",  
-                        "content": f"""Return the apt install command to update this app: {applicationName}                                 
-                                      Examples:
-                                      chrome/google → sudo apt update && sudo apt install --only-upgrade google-chrome-stable -y
-                                      calculator → sudo apt update && sudo apt install --only-upgrade gnome-calculator -y
-                                      system/all → sudo apt update && sudo apt upgrade -y
-                                      Return command for: {applicationName}"""})
-    
-    elif "OPEN" in user_prompt:   
-      applicationName = " ".join(user_prompt.split()[user_prompt.split().index("OPEN") + 1:])
-      hasOpen = True
-      messages.append({"role": "system",
-                        "content": f"""CRITICAL INSTRUCTION: Return ONLY the executable command. NO explanations, NO questions, NO extra text.
-                                    Ubuntu command mappings:
-                                    chrome/google → google-chrome
-                                    calculator → gnome-calculator
-                                    files → nautilus
-                                    terminal → gnome-terminal
+    messages = [
+        *recent_history,
+        {"role": "user", "content": user_prompt},
+        {
+            "role": "system",
+            "content": """You are Hatsune Miku, an Ubuntu Linux AI assistant with FULL system access.
 
-                                    User request: {applicationName}
+You can do ANYTHING on Ubuntu by generating bash commands.
 
-                                    Return format: Just the command name, nothing else.
-                                    Example responses:
-                                    google-chrome
-                                    gnome-calculator
-                                    nautilus
+RESPONSE FORMAT - each on its own line:
+[BASH]command     → run any bash command
+[SPEAK]text       → say something to user
 
-                                    Your response (command only):"""})
-    else:
-      messages.append(  {
-    "role": "system",
-    "content": "You are an Ubuntu assistant. Only give instructions relevant to Ubuntu/Linux. Ignore instructions about Windows or Mac. Explain step by step in simple language and proactively suggest what the user might need next."
-  })
-    
-    response: ChatResponse = chat(model='qwen2.5:1.5b', messages=messages)  
-    print(f"AI: {response.message.content}", flush=True)
+THAT'S IT. Only 2 tags needed for everything!
 
-    if hasOpen:  
-      system_commands.system_commands(response.message.content)
-      hasOpen = False
+EXAMPLES:
+"open chrome" → [BASH]google-chrome
+"open terminal" → [BASH]gnome-terminal
+"open calculator" → [BASH]gnome-calculator
+"open files" → [BASH]nautilus
+"open files in downloads" → [BASH]nautilus ~/Downloads
+"open youtube" → [BASH]google-chrome https://youtube.com
+"open gmail" → [BASH]google-chrome https://gmail.com
+"open vscode" → [BASH]code
+"open system monitor" → [BASH]gnome-system-monitor
+"open settings" → [BASH]gnome-control-center
+"install vlc" → [BASH]sudo apt install vlc -y
+"update system" → [BASH]sudo apt update && sudo apt upgrade -y
+"make folder test" → [BASH]mkdir ~/test
+"make folder test in downloads" → [BASH]mkdir ~/Downloads/test
+"delete folder test" → [BASH]rm -rf ~/test
+"calculate sin(45)" → [BASH]python3 -c "import math; print(math.sin(math.radians(45)))"
+"calculate 2+2" → [BASH]python3 -c "print(2+2)"
+"what is my ip" → [BASH]hostname -I
+"show disk space" → [BASH]df -h
+"create python file helloworld" → [BASH]echo "print('Hello, World!')" > ~/hello.py
+"hello" → [SPEAK]Hello! I am Miku, your Ubuntu assistant!
+"how to install vlc" → [SPEAK]Run sudo apt install vlc -y in your terminal!
 
-    if hasUpdate:  
-      update_commands.update_commands(response.message.content)
-      hasUpdate = False
+RULES:
+- Use [BASH] for ALL system actions including opening apps
+- Use [SPEAK] only for chat or explanations
+- NO other tags needed
+- NO markdown, NO backticks
+- ONE command per line
+- Apps need & to run in background: google-chrome &
+- NEVER add & to bash file/folder commands"""
+        }
+    ]
 
-    history.append({'role': 'user', 'content': user_prompt})  
-    history.append({'role': 'assistant', 'content': response.message.content})
-    
-    with open(history_path , "w") as data:  
-      json.dump(history, data)
+    response: ChatResponse = chat(model='gemma3:4b', messages=messages)
+    output = response.message.content.strip()
 
+    print(f"AI: {output}", flush=True)
 
+    for line in output.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+
+        if "[BASH]" in line:
+            command = line.split("[BASH]")[1].strip()
+            command = command.replace("```","").replace("`","").strip()
+            if command:
+                print(f"RUNNING: {command}", flush=True)
+                system_commands.system_commands(command)
+                time.sleep(0.3)
+
+        elif "[SPEAK]" in line:
+            command = line.split("[SPEAK]")[1].strip()
+            if command:
+                print(f"SPEAKING: {command}", flush=True)
+                engine.say(command)
+                engine.runAndWait()
+
+    if not any(tag in output for tag in ["[BASH]", "[SPEAK]"]):
+        print(f"AI: {output}", flush=True)
+        engine.say(output)
+        engine.runAndWait()
+
+    history.append({'role': 'user', 'content': user_prompt})
+    history.append({'role': 'assistant', 'content': output})
+
+    with open(history_path, "w") as data:
+        json.dump(history, data)
