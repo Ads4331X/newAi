@@ -40,7 +40,7 @@ app.whenReady().then(() => {
 
   let options = {
     mode: "text",
-    pythonPath: "/home/erza/git_projects/newAi/.venv/bin/python", // Use full path!
+    pythonPath: "/home/erza/git_projects/newAi/.venv_tts/bin/python",
     pythonOptions: ["-u"],
     scriptPath: path.join(__dirname, "../../backend"), // Path to folder
   };

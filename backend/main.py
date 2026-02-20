@@ -3,18 +3,19 @@ import json
 import sys
 import os
 import time
-import pyttsx3
+# import pyttsx3
 import system_commands
 import power_commands
+import tts_speak
 
-engine = pyttsx3.init()
-engine.setProperty('rate', 150)
-engine.setProperty('volume', 1.0)
-voices = engine.getProperty('voices')
-if len(voices) > 1:
-    engine.setProperty('voice', voices[1].id)
-else:
-    engine.setProperty('voice', voices[0].id)
+# engine = pyttsx3.init()
+# engine.setProperty('rate', 150)
+# engine.setProperty('volume', 1.0)
+# voices = engine.getProperty('voices')
+# if len(voices) > 1:
+#     engine.setProperty('voice', voices[1].id)
+# else:
+#     engine.setProperty('voice', voices[0].id)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 history_path = os.path.join(BASE_DIR, "data", "conversation_history.json")
@@ -79,7 +80,10 @@ EXAMPLES:
 "create python file helloworld" → [BASH]echo "print('Hello, World!')" > ~/hello.py
 "hello" → [SPEAK]Hello! I am Miku, your Ubuntu assistant!
 "how to install vlc" → [SPEAK]Run sudo apt install vlc -y in your terminal!
-
+"minimize current window" → [BASH]xdotool getactivewindow windowminimize
+"close current window" → [BASH]xdotool getactivewindow windowclose
+"maximize current window" → [BASH]xdotool getactivewindow windowmaximize
+"change tab" -> [BASh] command to change tab
 RULES:
 - Use [BASH] for ALL system actions including opening apps
 - Use [SPEAK] only for chat or explanations
@@ -113,13 +117,11 @@ RULES:
             command = line.split("[SPEAK]")[1].strip()
             if command:
                 print(f"SPEAKING: {command}", flush=True)
-                engine.say(command)
-                engine.runAndWait()
+                tts_speak.tts_speak(command)
 
     if not any(tag in output for tag in ["[BASH]", "[SPEAK]"]):
         print(f"AI: {output}", flush=True)
-        engine.say(output)
-        engine.runAndWait()
+        tts_speak.tts_speak(output)
 
     history.append({'role': 'user', 'content': user_prompt})
     history.append({'role': 'assistant', 'content': output})

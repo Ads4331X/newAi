@@ -4,3 +4,4 @@ __pycache__
 system_comands.json
 node_modules
 .vscode
+.venv_tts
