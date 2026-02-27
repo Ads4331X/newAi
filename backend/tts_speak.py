@@ -25,6 +25,8 @@ sys.stdout.close()
 sys.stdout = old_stdout
 
 def tts_speak(text):
+    text = text.replace("**", "").replace("*", "").replace("`", "").replace("#", "")
+    text = text.strip()
     sentences = re.split(r'(?<=[.!?]) +', text)
     for sentence in sentences:
         sentence = sentence.strip()

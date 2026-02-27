@@ -29,7 +29,12 @@ for line in sys.stdin:
         power_commands.power_commands(user_prompt.upper())
         print("Power command executed", flush=True)
         continue
-
+    if user_prompt == "MIC_START":
+        import stt_listen
+        text = stt_listen.listen_and_transcribe()
+        if text:
+            print(f"STT:{text}", flush=True)
+        continue
     recent_history = history[-4:] if len(history) > 4 else history
 
     messages = [
