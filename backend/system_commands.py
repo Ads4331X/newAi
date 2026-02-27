@@ -4,7 +4,6 @@ import time
 
 def system_commands(res):
     res = res.strip()
-    print(res, flush=True)
     
     timestamp = str(time.time()).replace(".", "")
     bash_path = os.path.join(
@@ -21,5 +20,3 @@ def system_commands(res):
     
     subprocess.run(["chmod", "+x", bash_path])
     subprocess.Popen(["bash", bash_path])
-    time.sleep(0.2)
-    print(f"Launched: {res}", flush=True)

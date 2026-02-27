@@ -2,25 +2,50 @@ import { Model } from "./components/Model";
 import { Box, CircularProgress } from "@mui/material";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import { useState, useEffect } from "react";
-
+import SpeechRecognition, {
+  useSpeechRecognition,
+} from "react-speech-recognition";
+import MicIcon from "@mui/icons-material/Mic";
+import MicOffIcon from "@mui/icons-material/MicOff";
 import { ResponseBox } from "./components/ResponseBox";
+
 function App() {
   const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
+  const [isListening, setIsListening] = useState(false);
+
+  const {
+    transcript,
+    listening,
+    resetTranscript,
+    browserSupportsSpeechRecognition,
+  } = useSpeechRecognition();
+
+  // Update prompt from transcript
+  useEffect(() => {
+    if (transcript) {
+      setPrompt(transcript);
+    }
+  }, [transcript]);
 
   // Listen for Python responses
   useEffect(() => {
     if (window.electron?.ipcRenderer) {
-      window.electron.ipcRenderer.on("python-response", (event, message) => {
+      const handler = (event, message) => {
         setResponse((prev) =>
           prev ? prev + message + " \n " : message + " \n ",
         );
         setLoading(false);
-      });
+      };
+
+      window.electron.ipcRenderer.on("python-response", handler);
+
+      return () => {
+        window.electron.ipcRenderer.removeListener("python-response", handler);
+      };
     }
   }, []);
-
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -32,22 +57,63 @@ function App() {
     }
   };
 
+  const toggleMic = () => {
+    if (isListening) {
+      // Stop and send
+      SpeechRecognition.stopListening();
+      setIsListening(false);
+
+      if (transcript) {
+        setResponse("");
+        setLoading(true);
+        sendPrompt(transcript);
+        resetTranscript();
+        setPrompt("");
+      }
+    } else {
+      // Start listening
+      resetTranscript();
+      SpeechRecognition.startListening({
+        continuous: true,
+        language: "en-US", // Add explicit language
+      });
+      setIsListening(true);
+    }
+  };
+
+  if (!browserSupportsSpeechRecognition) {
+    return (
+      <Box
+        sx={{
+          color: "red",
+          fontSize: "large",
+          backgroundColor: "whitesmoke",
+          p: 2,
+          borderRadius: 2,
+        }}
+      >
+        Browser doesn't support speech recognition.
+      </Box>
+    );
+  }
+
   return (
     <Box
       sx={{
         width: "min-content",
         display: "flex",
+        justifyContent: "center",
         flexDirection: "column",
         alignItems: "center",
         WebkitAppRegion: "drag",
         p: 2,
       }}
     >
-      {/* Input and Send */}
       <Box
         sx={{
           display: "flex",
           alignItems: "center",
+          gap: 1,
           p: 1,
           borderRadius: 2,
           WebkitAppRegion: "drag",
@@ -62,30 +128,43 @@ function App() {
             resize: "none",
             padding: "12px",
             borderRadius: "8px",
-            border: "none",
+            border: "1px solid #ccc",
             outline: "none",
             fontSize: "16px",
+            width: "300px",
+            height: "60px",
             WebkitAppRegion: "no-drag",
           }}
         />
+
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            WebkitAppRegion: "no-drag",
+            cursor: "pointer",
+          }}
+          onClick={toggleMic}
+        >
+          {isListening ? (
+            <MicIcon fontSize="large" sx={{ color: "red" }} />
+          ) : (
+            <MicOffIcon fontSize="large" sx={{ color: "violet" }} />
+          )}
+        </Box>
+
         <Box sx={{ ml: 1, WebkitAppRegion: "drag" }}>
           {loading ? (
             <CircularProgress />
           ) : (
-            <ZoomOutMapIcon
-              fontSize="large"
-              sx={{
-                color: "violet",
-              }}
-            />
+            <ZoomOutMapIcon fontSize="large" sx={{ color: "violet" }} />
           )}
         </Box>
       </Box>
 
-      {/* Model output */}
       <Model />
 
-      {/* Response box */}
       {response && (
         <Box
           sx={{
@@ -93,6 +172,7 @@ function App() {
             backgroundColor: "whitesmoke",
             p: 2,
             borderRadius: 2,
+            maxWidth: 400,
             WebkitAppRegion: "no-drag",
           }}
         >
@@ -104,6 +184,8 @@ function App() {
 }
 
 function sendPrompt(user_prompt) {
+  console.log("sendPrompt called with:", user_prompt);
+
   if (user_prompt.length > 0) {
     if (window.electronAPI && window.electronAPI.getPrompt) {
       window.electronAPI.getPrompt(user_prompt);

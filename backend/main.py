@@ -3,19 +3,9 @@ import json
 import sys
 import os
 import time
-# import pyttsx3
 import system_commands
 import power_commands
 import tts_speak
-
-# engine = pyttsx3.init()
-# engine.setProperty('rate', 150)
-# engine.setProperty('volume', 1.0)
-# voices = engine.getProperty('voices')
-# if len(voices) > 1:
-#     engine.setProperty('voice', voices[1].id)
-# else:
-#     engine.setProperty('voice', voices[0].id)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 history_path = os.path.join(BASE_DIR, "data", "conversation_history.json")
@@ -40,91 +30,97 @@ for line in sys.stdin:
         print("Power command executed", flush=True)
         continue
 
-    recent_history = history[-6:] if len(history) > 6 else history
+    recent_history = history[-4:] if len(history) > 4 else history
 
     messages = [
         *recent_history,
         {"role": "user", "content": user_prompt},
-        {
-            "role": "system",
-            "content": """You are Hatsune Miku, an Ubuntu Linux AI assistant with FULL system access.
+    {
+    "role": "system",
+    "content": """You are Hatsune Miku, Ubuntu assistant.
 
-You can do ANYTHING on Ubuntu by generating bash commands.
+CRITICAL RULES:
+1. Be EXTREMELY brief - 1-2 sentences maximum!
+2. ALWAYS use UPPERCASE tags: [BASH] or [SPEAK]
+3. Use markdown formatting in [SPEAK] responses:
+   - **bold** for emphasis
+   - *italic* for tone
+   - `code` for commands/file names
+   - - lists when needed
+4. For long explanations, use text WITHOUT [SPEAK] tag.
 
-RESPONSE FORMAT - each on its own line:
-[BASH]command     → run any bash command
-[SPEAK]text       → say something to user
 
-THAT'S IT. Only 2 tags needed for everything!
+FORMAT:
+[BASH]command
+[SPEAK]formatted text with **bold**, *italic*, `code`
 
-EXAMPLES:
-"open chrome" → [BASH]google-chrome
-"open terminal" → [BASH]gnome-terminal
-"open calculator" → [BASH]gnome-calculator
-"open files" → [BASH]nautilus
-"open files in downloads" → [BASH]nautilus ~/Downloads
-"open youtube" → [BASH]google-chrome https://youtube.com
-"open gmail" → [BASH]google-chrome https://gmail.com
-"open vscode" → [BASH]code
-"open system monitor" → [BASH]gnome-system-monitor
-"open settings" → [BASH]gnome-control-center
+FORMATTING EXAMPLES:
+"what is freedom" → [SPEAK]Freedom is **doing what you want** while *respecting others*.
+"how to install vlc" → [SPEAK]Use: `sudo apt install vlc -y`
+"what's important" → [SPEAK]**Privacy** and *security* are key!
+"list features" → [SPEAK]Features: **Fast**, *Reliable*, Easy to use
+
+COMMAND EXAMPLES:
+"open chrome" → [BASH]google-chrome &
+"hello" → [SPEAK]Hi! I'm **Miku**!
 "install vlc" → [BASH]sudo apt install vlc -y
-"update system" → [BASH]sudo apt update && sudo apt upgrade -y
-"make folder test" → [BASH]mkdir ~/test
-"make folder test in downloads" → [BASH]mkdir ~/Downloads/test
-"delete folder test" → [BASH]rm -rf ~/test
-"calculate sin(45)" → [BASH]python3 -c "import math; print(math.sin(math.radians(45)))"
-"calculate 2+2" → [BASH]python3 -c "print(2+2)"
-"what is my ip" → [BASH]hostname -I
-"show disk space" → [BASH]df -h
-"create python file helloworld" → [BASH]echo "print('Hello, World!')" > ~/hello.py
-"hello" → [SPEAK]Hello! I am Miku, your Ubuntu assistant!
-"how to install vlc" → [SPEAK]Run sudo apt install vlc -y in your terminal!
-"minimize current window" → [BASH]xdotool getactivewindow windowminimize
-"close current window" → [BASH]xdotool getactivewindow windowclose
-"maximize current window" → [BASH]xdotool getactivewindow windowmaximize
-"change tab" -> [BASh] command to change tab
-RULES:
-- Use [BASH] for ALL system actions including opening apps
-- Use [SPEAK] only for chat or explanations
-- NO other tags needed
-- NO markdown, NO backticks
-- ONE command per line
-- Apps need & to run in background: google-chrome &
-- NEVER add & to bash file/folder commands"""
-        }
-    ]
 
-    response: ChatResponse = chat(model='gemma3:4b', messages=messages)
+RULES:
+- Use **bold** for important words
+- Use *italic* for emphasis/tone
+- Use `backticks` for commands
+- Max 2 sentences for [SPEAK]!
+- Add & for GUI apps
+- BE BRIEF!"""
+}]
+
+    response: ChatResponse = chat(model='qwen2.5:1.5b', messages=messages)
     output = response.message.content.strip()
 
-    print(f"AI: {output}", flush=True)
+    # Remove formatting garbage
+    # output = output.replace("**", "").replace("[BOLD]", "").replace("[/BOLD]", "")
+    output = output.replace("[NOTE]", "").replace("[SAFETY]", "").strip()
+
+    # Clean display
+    display_output = output.replace("[BASH]", "").replace("[SPEAK]", "").strip()
+    print(f"{display_output}", flush=True)
 
     for line in output.split("\n"):
         line = line.strip()
-        if not line:
+        if not line or line.startswith("[") and "]" not in line:
             continue
 
-        if "[BASH]" in line:
-            command = line.split("[BASH]")[1].strip()
+        line_upper = line.upper()
+
+        if "[BASH]" in line_upper:
+            if "[BASH]" in line:
+                command = line.split("[BASH]")[1].strip()
+            else:
+                command = line.split("[bash]")[1].strip()
+            
             command = command.replace("```","").replace("`","").strip()
             if command:
-                print(f"RUNNING: {command}", flush=True)
                 system_commands.system_commands(command)
-                time.sleep(0.3)
+                time.sleep(0.1)
 
-        elif "[SPEAK]" in line:
-            command = line.split("[SPEAK]")[1].strip()
+        elif "[SPEAK]" in line_upper:
+            if "[SPEAK]" in line:
+                command = line.split("[SPEAK]")[1].strip()
+            else:
+                command = line.split("[speak]")[1].strip()
+            
             if command:
-                print(f"SPEAKING: {command}", flush=True)
                 tts_speak.tts_speak(command)
 
-    if not any(tag in output for tag in ["[BASH]", "[SPEAK]"]):
-        print(f"AI: {output}", flush=True)
+    if not any(tag in output.upper() for tag in ["[BASH]", "[SPEAK]"]):
         tts_speak.tts_speak(output)
 
     history.append({'role': 'user', 'content': user_prompt})
     history.append({'role': 'assistant', 'content': output})
+
+    # Keep only last 8 messages
+    if len(history) > 8:
+        history = history[-8:]
 
     with open(history_path, "w") as data:
         json.dump(history, data)

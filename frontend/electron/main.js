@@ -2,6 +2,8 @@ let { PythonShell } = require("python-shell");
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 
+app.commandLine.appendSwitch("enable-features", "OnDeviceWebSpeech");
+app.commandLine.appendSwitch("log-level", "3");
 let mainWindow;
 
 const preloadPath = path.resolve(__dirname, "preload.js");
@@ -22,8 +24,6 @@ function createWindow() {
   });
 
   mainWindow.loadURL("http://localhost:5173");
-
-  // CRITICAL: Don't ignore mouse events!
   mainWindow.setIgnoreMouseEvents(false);
 }
 
@@ -37,6 +37,7 @@ ipcMain.on("resize-window", (event, width, height) => {
 
 app.whenReady().then(() => {
   createWindow();
+  mainWindow.webContents.openDevTools();
 
   let options = {
     mode: "text",
@@ -59,6 +60,8 @@ app.whenReady().then(() => {
     pyshell.send(user_prompt);
   });
 });
+
+app.commandLine.appendSwitch("enable-features", "OnDeviceWebSpeech");
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

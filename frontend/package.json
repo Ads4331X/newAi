@@ -29,6 +29,7 @@
     "python-shell": "^5.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-markdown": "^10.1.0"
+    "react-markdown": "^10.1.0",
+    "react-speech-recognition": "^4.0.1"
   }
 }
