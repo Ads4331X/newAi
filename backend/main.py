@@ -29,93 +29,111 @@ for line in sys.stdin:
         power_commands.power_commands(user_prompt.upper())
         print("Power command executed", flush=True)
         continue
+
     if user_prompt == "MIC_START":
         import stt_listen
         text = stt_listen.listen_and_transcribe()
         if text:
             print(f"STT:{text}", flush=True)
         continue
+
     recent_history = history[-4:] if len(history) > 4 else history
 
     messages = [
-        *recent_history,
-        {"role": "user", "content": user_prompt},
-    {
-    "role": "system",
-    "content": """You are Hatsune Miku, Ubuntu assistant.
+        {
+            "role": "system",
+           "content": """You are Hatsune Miku, Ubuntu assistant.
 
 CRITICAL RULES:
 1. Be EXTREMELY brief - 1-2 sentences maximum!
 2. ALWAYS use UPPERCASE tags: [BASH] or [SPEAK]
-3. Use markdown formatting in [SPEAK] responses:
-   - **bold** for emphasis
-   - *italic* for tone
-   - `code` for commands/file names
-   - - lists when needed
-4. For long explanations, use text WITHOUT [SPEAK] tag.
-
+3. For multiple apps/commands, use ONE [BASH] tag per command on separate lines.
+4. No markdown in [SPEAK] - plain text only!
 
 FORMAT:
 [BASH]command
-[SPEAK]formatted text with **bold**, *italic*, `code`
-
-FORMATTING EXAMPLES:
-"what is freedom" → [SPEAK]Freedom is **doing what you want** while *respecting others*.
-"how to install vlc" → [SPEAK]Use: `sudo apt install vlc -y`
-"what's important" → [SPEAK]**Privacy** and *security* are key!
-"list features" → [SPEAK]Features: **Fast**, *Reliable*, Easy to use
+[SPEAK]plain text
 
 COMMAND EXAMPLES:
 "open chrome" → [BASH]google-chrome &
-"hello" → [SPEAK]Hi! I'm **Miku**!
+"hello" → [SPEAK]Hi! I am Miku!
 "install vlc" → [BASH]sudo apt install vlc -y
+"open chrome and files" → [BASH]google-chrome &
+[BASH]nautilus &
+"open files" → [BASH]nautilus &
+"open system monitor" → [BASH]gnome-system-monitor &
+"open calculator" → [BASH]gnome-calculator &
+"open filezilla" → [BASH]filezilla &
+"open app center" → [BASH]snap-store &
+"open any app" → [BASH]appname &
+"open any unknown app" → [BASH]xdg-open appname &
+"open a pdf" → [BASH]xdg-open /path/to/file.pdf &
+"open folder" → [BASH]xdg-open /path/to/folder &
+"update system" → [BASH]sudo apt update && sudo apt upgrade -y
+"what time is it" → [BASH]notify-send "Time" "$(date +%H:%M)"
+"whats the date" → [BASH]notify-send "Date" "$(date +%A, %B %d %Y)"
+"disk space" → [BASH]notify-send "Disk Space" "$(df -h / | tail -1)"
+"battery" → [BASH]notify-send "Battery" "$(cat /sys/class/power_supply/BAT0/capacity)%"
+"screenshot" → [BASH]gnome-screenshot &
+"volume up" → [BASH]pactl set-sink-volume @DEFAULT_SINK@ +10%
+"volume down" → [BASH]pactl set-sink-volume @DEFAULT_SINK@ -10%
+"mute" → [BASH]pactl set-sink-mute @DEFAULT_SINK@ toggle
+"wifi on" → [BASH]nmcli radio wifi on
+"wifi off" → [BASH]nmcli radio wifi off
+"night light on" → [BASH]gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled true
+"night light off" → [BASH]gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled false
+"bluetooth on" → [BASH]rfkill unblock bluetooth
+"bluetooth off" → [BASH]rfkill block bluetooth
+"empty trash" → [BASH]rm -rf ~/.local/share/Trash/*
 
 RULES:
-- Use **bold** for important words
-- Use *italic* for emphasis/tone
-- Use `backticks` for commands
-- Max 2 sentences for [SPEAK]!
+- One command per [BASH] tag
 - Add & for GUI apps
+- Use xdg-open for any file or unknown app
+- Use notify-send for info that should be read not spoken
 - BE BRIEF!"""
-}]
+        },
+        *recent_history,
+        {"role": "user", "content": user_prompt},
+    ]
 
     response: ChatResponse = chat(model='qwen2.5:1.5b', messages=messages)
     output = response.message.content.strip()
 
-    # Remove formatting garbage
-    # output = output.replace("**", "").replace("[BOLD]", "").replace("[/BOLD]", "")
     output = output.replace("[NOTE]", "").replace("[SAFETY]", "").strip()
 
-    # Clean display
     display_output = output.replace("[BASH]", "").replace("[SPEAK]", "").strip()
     print(f"{display_output}", flush=True)
 
-    for line in output.split("\n"):
-        line = line.strip()
-        if not line or line.startswith("[") and "]" not in line:
+    for chunk in output.split("\n"):
+        chunk = chunk.strip()
+        if not chunk or chunk.startswith("[") and "]" not in chunk:
             continue
 
-        line_upper = line.upper()
+        chunk_upper = chunk.upper()
 
-        if "[BASH]" in line_upper:
-            if "[BASH]" in line:
-                command = line.split("[BASH]")[1].strip()
+        if "[BASH]" in chunk_upper:
+            if "[BASH]" in chunk:
+                command = chunk.split("[BASH]")[1].strip()
             else:
-                command = line.split("[bash]")[1].strip()
-            
-            command = command.replace("```","").replace("`","").strip()
-            if command:
-                system_commands.system_commands(command)
-                time.sleep(0.1)
+                command = chunk.split("[bash]")[1].strip()
 
-        elif "[SPEAK]" in line_upper:
-            if "[SPEAK]" in line:
-                command = line.split("[SPEAK]")[1].strip()
+            command = command.replace("```", "").replace("`", "").strip()
+            # Split on && or ; and run each separately
+            for cmd in command.replace(";", "&&").split("&&"):
+                cmd = cmd.strip()
+                if cmd:
+                    system_commands.system_commands(cmd)
+                    time.sleep(0.2)
+
+        elif "[SPEAK]" in chunk_upper:
+            if "[SPEAK]" in chunk:
+                text = chunk.split("[SPEAK]")[1].strip()
             else:
-                command = line.split("[speak]")[1].strip()
-            
-            if command:
-                tts_speak.tts_speak(command)
+                text = chunk.split("[speak]")[1].strip()
+
+            if text:
+                tts_speak.tts_speak(text)
 
     if not any(tag in output.upper() for tag in ["[BASH]", "[SPEAK]"]):
         tts_speak.tts_speak(output)
@@ -123,7 +141,6 @@ RULES:
     history.append({'role': 'user', 'content': user_prompt})
     history.append({'role': 'assistant', 'content': output})
 
-    # Keep only last 8 messages
     if len(history) > 8:
         history = history[-8:]
 
