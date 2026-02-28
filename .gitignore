@@ -6,3 +6,5 @@ node_modules
 .vscode
 .venv_ttsbackend/voices/*.onnx
 backend/voices/*.bin
+backend/voices/*.onnx
+backend/voices/*.bin
