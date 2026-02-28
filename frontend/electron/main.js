@@ -37,7 +37,6 @@ ipcMain.on("resize-window", (event, width, height) => {
 
 app.whenReady().then(() => {
   createWindow();
-  mainWindow.webContents.openDevTools();
 
   let options = {
     mode: "text",

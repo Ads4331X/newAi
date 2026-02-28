@@ -7,22 +7,21 @@ from faster_whisper import WhisperModel
 model = WhisperModel("base", device="cpu", compute_type="int8")
 SAMPLE_RATE = 16000
 
-
 def record_until_silence():
     chunks = []
     silence_count = 0
     started = False
-    SILENCE_THRESHOLD = 0.01
-    SILENCE_DURATION = 0.5
+    SILENCE_THRESHOLD = 0.012
+    SILENCE_DURATION = 1.0
     MAX_RECORD = SAMPLE_RATE * 10
     total_samples = 0
-    
+
+    print("Listening... speak now!", flush=True)
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype='float32') as stream:
         while True:
             chunk, _ = stream.read(1024)
             volume = np.abs(chunk).mean()
             total_samples += len(chunk)
-
 
             if volume > SILENCE_THRESHOLD:
                 started = True
@@ -33,12 +32,13 @@ def record_until_silence():
                 silence_count += len(chunk)
                 if silence_count >= SAMPLE_RATE * SILENCE_DURATION:
                     break
-            
+
             if total_samples >= MAX_RECORD:
                 break
-    
+
     if not chunks:
         return None
+
     audio = np.concatenate(chunks)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         with wave.open(f.name, 'wb') as wf:
@@ -48,8 +48,6 @@ def record_until_silence():
             wf.writeframes((audio * 32767).astype(np.int16).tobytes())
         return f.name
 
-
-# THIS WAS MISSING ↓
 def listen_and_transcribe():
     path = record_until_silence()
     if not path:

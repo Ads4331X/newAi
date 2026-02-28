@@ -42,12 +42,12 @@ for line in sys.stdin:
     messages = [
         {
             "role": "system",
-           "content": """You are Hatsune Miku, Ubuntu assistant.
+            "content": """You are Hatsune Miku, Ubuntu assistant.
 
 CRITICAL RULES:
 1. Be EXTREMELY brief - 1-2 sentences maximum!
 2. ALWAYS use UPPERCASE tags: [BASH] or [SPEAK]
-3. For multiple apps/commands, use ONE [BASH] tag per command on separate lines.
+3. For multiple apps/commands, use ONE [BASH] tag per command on SEPARATE LINES.
 4. No markdown in [SPEAK] - plain text only!
 
 FORMAT:
@@ -58,7 +58,8 @@ COMMAND EXAMPLES:
 "open chrome" → [BASH]google-chrome &
 "hello" → [SPEAK]Hi! I am Miku!
 "install vlc" → [BASH]sudo apt install vlc -y
-"open chrome and files" → [BASH]google-chrome &
+"open chrome and files" →
+[BASH]google-chrome &
 [BASH]nautilus &
 "open files" → [BASH]nautilus &
 "open system monitor" → [BASH]gnome-system-monitor &
@@ -88,6 +89,7 @@ COMMAND EXAMPLES:
 
 RULES:
 - One command per [BASH] tag
+- Each [BASH] on its own line
 - Add & for GUI apps
 - Use xdg-open for any file or unknown app
 - Use notify-send for info that should be read not spoken
@@ -97,7 +99,7 @@ RULES:
         {"role": "user", "content": user_prompt},
     ]
 
-    response: ChatResponse = chat(model='qwen2.5:1.5b', messages=messages)
+    response: ChatResponse = chat(model='gemma3:4b', messages=messages)
     output = response.message.content.strip()
 
     output = output.replace("[NOTE]", "").replace("[SAFETY]", "").strip()
@@ -105,9 +107,12 @@ RULES:
     display_output = output.replace("[BASH]", "").replace("[SPEAK]", "").strip()
     print(f"{display_output}", flush=True)
 
-    for chunk in output.split("\n"):
+    # Split inline tags first, then process line by line
+    normalized = output.replace("[BASH]", "\n[BASH]").replace("[SPEAK]", "\n[SPEAK]")
+
+    for chunk in normalized.split("\n"):
         chunk = chunk.strip()
-        if not chunk or chunk.startswith("[") and "]" not in chunk:
+        if not chunk:
             continue
 
         chunk_upper = chunk.upper()
@@ -119,19 +124,17 @@ RULES:
                 command = chunk.split("[bash]")[1].strip()
 
             command = command.replace("```", "").replace("`", "").strip()
-            # Split on && or ; and run each separately
             for cmd in command.replace(";", "&&").split("&&"):
                 cmd = cmd.strip()
                 if cmd:
                     system_commands.system_commands(cmd)
-                    time.sleep(0.2)
+                    time.sleep(0.5)
 
         elif "[SPEAK]" in chunk_upper:
             if "[SPEAK]" in chunk:
                 text = chunk.split("[SPEAK]")[1].strip()
             else:
                 text = chunk.split("[speak]")[1].strip()
-
             if text:
                 tts_speak.tts_speak(text)
 
