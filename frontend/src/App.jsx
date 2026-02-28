@@ -11,6 +11,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   useEffect(() => {
     if (window.electron?.ipcRenderer) {
@@ -27,6 +28,8 @@ function App() {
             prev ? prev + message + " \n " : message + " \n ",
           );
           setLoading(false);
+          setIsSpeaking(true);
+          setTimeout(() => setIsSpeaking(false), 3000);
         }
       };
       window.electron.ipcRenderer.on("python-response", handler);
@@ -120,7 +123,7 @@ function App() {
         </Box>
       </Box>
 
-      <Model />
+      <Model isSpeaking={isSpeaking} />
 
       {response && (
         <Box

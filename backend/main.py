@@ -15,34 +15,7 @@ with open(history_path, "r") as data:
 
 powerComands = ["SHUTDOWN", "RESTART", "SUSPEND", "SLEEP", "LOGOUT", "LOCK", "REBOOT"]
 
-for line in sys.stdin:
-    user_prompt = line.strip()
-
-    if not user_prompt:
-        continue
-
-    if user_prompt.upper() in ["QUIT", "EXIT", "Q", "E"]:
-        print("Exiting...", flush=True)
-        break
-
-    if user_prompt.upper() in powerComands:
-        power_commands.power_commands(user_prompt.upper())
-        print("Power command executed", flush=True)
-        continue
-
-    if user_prompt == "MIC_START":
-        import stt_listen
-        text = stt_listen.listen_and_transcribe()
-        if text:
-            print(f"STT:{text}", flush=True)
-        continue
-
-    recent_history = history[-4:] if len(history) > 4 else history
-
-    messages = [
-        {
-            "role": "system",
-            "content": """You are Hatsune Miku, Ubuntu assistant.
+SYSTEM_PROMPT = """You are Hatsune Miku, Ubuntu assistant.
 
 CRITICAL RULES:
 1. Be EXTREMELY brief - 1-2 sentences maximum!
@@ -94,7 +67,69 @@ RULES:
 - Use xdg-open for any file or unknown app
 - Use notify-send for info that should be read not spoken
 - BE BRIEF!"""
-        },
+
+
+def run_and_capture(command):
+    """Run command and return output"""
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={
+                **os.environ,
+                'DISPLAY': os.environ.get('DISPLAY', ':1'),
+                'DBUS_SESSION_BUS_ADDRESS': os.environ.get(
+                    'DBUS_SESSION_BUS_ADDRESS',
+                    'unix:path=/run/user/1000/bus'
+                )
+            }
+        )
+        return (result.stdout + result.stderr).strip()
+    except Exception as e:
+        return str(e)
+
+
+def summarize_output(output_text, messages):
+    """Ask LLM to summarize bash output"""
+    follow_up = messages + [
+        {"role": "assistant", "content": f"[BASH ran, output below]"},
+        {"role": "user", "content": f"Command output: {output_text}\nSummarize this briefly in one sentence using [SPEAK]."}
+    ]
+    resp = chat(model='gemma3:4b', messages=follow_up)
+    return resp.message.content.strip()
+
+
+import subprocess
+
+for line in sys.stdin:
+    user_prompt = line.strip()
+
+    if not user_prompt:
+        continue
+
+    if user_prompt.upper() in ["QUIT", "EXIT", "Q", "E"]:
+        print("Exiting...", flush=True)
+        break
+
+    if user_prompt.upper() in powerComands:
+        power_commands.power_commands(user_prompt.upper())
+        print("Power command executed", flush=True)
+        continue
+
+    if user_prompt == "MIC_START":
+        import stt_listen
+        text = stt_listen.listen_and_transcribe()
+        if text:
+            print(f"STT:{text}", flush=True)
+        continue
+
+    recent_history = history[-4:] if len(history) > 4 else history
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
         *recent_history,
         {"role": "user", "content": user_prompt},
     ]
@@ -107,8 +142,9 @@ RULES:
     display_output = output.replace("[BASH]", "").replace("[SPEAK]", "").strip()
     print(f"{display_output}", flush=True)
 
-    # Split inline tags first, then process line by line
     normalized = output.replace("[BASH]", "\n[BASH]").replace("[SPEAK]", "\n[SPEAK]")
+
+    bash_outputs = []
 
     for chunk in normalized.split("\n"):
         chunk = chunk.strip()
@@ -124,11 +160,17 @@ RULES:
                 command = chunk.split("[bash]")[1].strip()
 
             command = command.replace("```", "").replace("`", "").strip()
-            for cmd in command.replace(";", "&&").split("&&"):
-                cmd = cmd.strip()
-                if cmd:
-                    system_commands.system_commands(cmd)
-                    time.sleep(0.5)
+
+            # GUI apps (end with &) - just launch, don't capture
+            if command.endswith("&"):
+                system_commands.system_commands(command)
+                time.sleep(0.5)
+            else:
+                # Non-GUI commands - capture output
+                cmd_output = run_and_capture(command)
+                if cmd_output:
+                    bash_outputs.append(f"$ {command}\n{cmd_output}")
+                time.sleep(0.2)
 
         elif "[SPEAK]" in chunk_upper:
             if "[SPEAK]" in chunk:
@@ -136,9 +178,21 @@ RULES:
             else:
                 text = chunk.split("[speak]")[1].strip()
             if text:
+                tts_speak.stop_speaking()
                 tts_speak.tts_speak(text)
 
+    # If there was bash output, let LLM summarize and speak it
+    if bash_outputs:
+        combined = "\n".join(bash_outputs)
+        print(f"BASH OUTPUT: {combined}", flush=True)
+        summary = summarize_output(combined, messages)
+        summary_clean = summary.replace("[SPEAK]", "").replace("[BASH]", "").strip()
+        print(f"{summary_clean}", flush=True)
+        tts_speak.stop_speaking()
+        tts_speak.tts_speak(summary_clean)
+
     if not any(tag in output.upper() for tag in ["[BASH]", "[SPEAK]"]):
+        tts_speak.stop_speaking()
         tts_speak.tts_speak(output)
 
     history.append({'role': 'user', 'content': user_prompt})
@@ -148,4 +202,4 @@ RULES:
         history = history[-8:]
 
     with open(history_path, "w") as data:
-        json.dump(history, data)
+        json.dump(history, data, indent=2)

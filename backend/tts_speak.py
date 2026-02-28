@@ -14,6 +14,16 @@ kokoro = Kokoro(
 )
 VOICE = "af_bella"
 
+# Global stop flag
+_stop_event = threading.Event()
+_aplay_process = None
+
+def stop_speaking():
+    global _aplay_process
+    _stop_event.set()
+    if _aplay_process:
+        _aplay_process.terminate()
+
 def clean_text(text):
     text = text.replace("**", "").replace("*", "").replace("`", "").replace("#", "")
     return text.strip()
@@ -27,12 +37,18 @@ def generate_chunk(text):
     return samples, sample_rate
 
 def player_worker(play_queue):
+    global _aplay_process
     while True:
         item = play_queue.get()
         if item is None:
             break
+        if _stop_event.is_set():
+            play_queue.task_done()
+            continue
         path = item[0]
-        subprocess.run(['aplay', '-q', path], check=False)
+        _aplay_process = subprocess.Popen(['aplay', '-q', path])
+        _aplay_process.wait()
+        _aplay_process = None
         try:
             os.remove(path)
         except:
@@ -40,6 +56,10 @@ def player_worker(play_queue):
         play_queue.task_done()
 
 def tts_speak(text):
+    global _stop_event
+    # Reset stop flag for new speech
+    _stop_event.clear()
+
     text = clean_text(text)
     if not text:
         return
@@ -50,6 +70,8 @@ def tts_speak(text):
     player_thread = threading.Thread(target=player_worker, args=(play_queue,), daemon=True)
     player_thread.start()
     for chunk in chunks:
+        if _stop_event.is_set():
+            break
         samples, sample_rate = generate_chunk(chunk)
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         tmp.close()
