@@ -6,9 +6,10 @@ An AI-powered desktop assistant with Live2D Miku avatar, voice interaction, and 
 
 ## Features
 
-- 🎤 **Voice TTS** - Coqui TTS with natural female voice
-- 🤖 **AI Chat** - Powered by Ollama (Gemma 3:4b)
-- 💻 **System Control** - Open apps, manage files, run commands
+- 🎤 **Voice Input (STT)** - Offline speech recognition via Whisper (faster-whisper)
+- 🔊 **Voice Output (TTS)** - Anime-style voice via Kokoro TTS (offline, no API needed)
+- 🤖 **AI Chat** - Powered by Ollama (qwen2.5:1.5b or gemma3:4b)
+- 💻 **System Control** - Open any app, manage files, run commands, control WiFi/Bluetooth/night light
 - 🎭 **Live2D Avatar** - Interactive Miku character
 - 🖥️ **Always-on-top** - Transparent, draggable window
 
@@ -17,8 +18,8 @@ An AI-powered desktop assistant with Live2D Miku avatar, voice interaction, and 
 ## System Requirements
 
 - **OS**: Ubuntu 24.04 (or similar Debian-based)
-- **RAM**: 16GB recommended
-- **Storage**: ~15GB free space
+- **RAM**: 8GB minimum, 16GB recommended
+- **Storage**: ~5GB free space
 - **Python**: 3.11
 - **Node.js**: 18+
 - **GPU**: Optional (CPU works fine)
@@ -53,13 +54,15 @@ curl -fsSL https://ollama.com/install.sh | sh
 **Pull the AI model:**
 
 ```bash
+ollama pull qwen2.5:1.5b
+# or for better quality:
 ollama pull gemma3:4b
 ```
 
 ### 4. Install System Dependencies
 
 ```bash
-sudo apt install -y xdotool aplay mpg123
+sudo apt install -y xdotool alsa-utils ffmpeg portaudio19-dev
 ```
 
 ---
@@ -69,7 +72,7 @@ sudo apt install -y xdotool aplay mpg123
 ### 1. Clone Repository
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/Ads4331X/newAi.git
 cd newAi
 ```
 
@@ -83,21 +86,29 @@ python3.11 -m venv .venv_tts
 source .venv_tts/bin/activate
 
 # Install Python dependencies
-pip install ollama requests TTS torch==2.3.0 torchaudio==2.3.0
-
-# Install Japanese TTS support
-pip install TTS[ja]
+pip install ollama faster-whisper sounddevice numpy kokoro-onnx soundfile
 ```
 
-### 3. Frontend Setup (Electron)
+### 3. Download Voice Models
+
+The TTS model files are too large for GitHub. Download them manually:
+
+```bash
+mkdir -p backend/voices
+cd backend/voices
+
+# Download Kokoro TTS models
+wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+
+cd ../..
+```
+
+### 4. Frontend Setup (Electron)
 
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Return to project root
 cd ..
 ```
 
@@ -107,7 +118,7 @@ cd ..
 
 ### 1. Set Python Path in Electron
 
-Edit `frontend/electron/main.js` and update line 22:
+Edit `frontend/electron/main.js` and update the python path:
 
 ```javascript
 pythonPath: "/home/YOUR_USERNAME/git_projects/newAi/.venv_tts/bin/python",
@@ -121,10 +132,10 @@ Replace `YOUR_USERNAME` with your actual username.
 echo $DISPLAY
 ```
 
-If it's NOT `:1`, edit `backend/system_commands.py` line 13:
+If it's NOT `:0`, edit `backend/system_commands.py` and update:
 
 ```python
-bash_file.write("export DISPLAY=:YOUR_DISPLAY\n")
+env={**os.environ, 'DISPLAY': ':0'}
 ```
 
 ---
@@ -177,28 +188,43 @@ npm start
 
 ## Usage
 
-### Voice Commands
+### Voice Input
 
-- **"open chrome"** - Opens Google Chrome
-- **"open files"** - Opens file manager
-- **"open terminal"** - Opens terminal
-- **"calculate 2+2"** - Performs calculation
-- **"what is my ip"** - Shows IP address
-- **"make folder test in downloads"** - Creates folder
-- **"minimize window"** - Minimizes current window
+Click the mic button and speak. Whisper will transcribe your voice offline and send it to the AI.
 
-### Chat
+### Text Input
 
-- **"hello"** - Greet Miku
-- **"how to install vlc"** - Get instructions
+Type in the input box and press Enter.
 
-### System Commands
+### Example Commands
 
-Type directly:
+| You say                | What happens                  |
+| ---------------------- | ----------------------------- |
+| "hi"                   | Miku greets you               |
+| "open chrome"          | Opens Google Chrome           |
+| "open files"           | Opens file manager (Nautilus) |
+| "open calculator"      | Opens GNOME Calculator        |
+| "open filezilla"       | Opens FileZilla               |
+| "install vlc"          | Installs VLC via apt          |
+| "update system"        | Runs apt update & upgrade     |
+| "what time is it"      | Shows time notification       |
+| "disk space"           | Shows disk usage              |
+| "battery"              | Shows battery percentage      |
+| "volume up / down"     | Adjusts system volume         |
+| "mute"                 | Toggles mute                  |
+| "wifi on / off"        | Toggles WiFi                  |
+| "bluetooth on / off"   | Toggles Bluetooth             |
+| "night light on / off" | Toggles night light           |
+| "screenshot"           | Takes a screenshot            |
+| "empty trash"          | Empties the trash             |
+
+### Power Commands (type directly)
 
 - `SHUTDOWN` - Shuts down system
 - `RESTART` - Restarts system
+- `SUSPEND` - Suspends system
 - `LOCK` - Locks screen
+- `LOGOUT` - Logs out
 
 ---
 
@@ -206,23 +232,35 @@ Type directly:
 
 ### No Voice Output
 
-1. Check audio device:
+1. Test TTS standalone:
+
+```bash
+cd backend
+/home/YOUR_USERNAME/git_projects/newAi/.venv_tts/bin/python -c "import tts_speak; tts_speak.tts_speak('Hello I am Miku')"
+```
+
+2. Check audio device:
 
 ```bash
 aplay -l
 ```
 
-2. Test audio:
+3. Verify model files exist:
 
 ```bash
-speaker-test -t wav -c 2
+ls backend/voices/
+# Should show: kokoro-v1.0.onnx  voices-v1.0.bin
 ```
 
-3. Check TTS installation:
+### No Voice Input (Mic not working)
+
+1. Test microphone:
 
 ```bash
-python -c "from TTS.api import TTS; print('TTS OK')"
+arecord -d 3 test.wav && aplay test.wav
 ```
+
+2. Check mic permissions in system settings.
 
 ### Apps Not Opening
 
@@ -232,12 +270,12 @@ python -c "from TTS.api import TTS; print('TTS OK')"
 echo $DISPLAY
 ```
 
-2. Update `system_commands.py` with correct display
+2. Update `system_commands.py` with correct display value (`:0` or `:1`)
 
 3. Test manually:
 
 ```bash
-DISPLAY=:1 nautilus &
+DISPLAY=:0 nautilus &
 ```
 
 ### Import Errors
@@ -251,12 +289,7 @@ which python
 
 ### Out of Storage
 
-Free up space:
-
 ```bash
-# Clean caches
-rm -rf ~/.cache/google-chrome
-rm -rf ~/.cache/vscode-cpptools
 pip cache purge
 sudo apt clean
 sudo apt autoremove
@@ -269,32 +302,36 @@ sudo apt autoremove
 ```
 newAi/
 ├── backend/
-│   ├── main.py              # Main AI logic
-│   ├── system_commands.py   # System command executor
-│   ├── power_commands.py    # Power management
-│   ├── tts_speak.py         # Text-to-speech
+│   ├── main.py                      # Main AI logic & tag processing
+│   ├── system_commands.py           # System command executor (with app finder)
+│   ├── power_commands.py            # Power management
+│   ├── tts_speak.py                 # Kokoro TTS with parallel playback
+│   ├── stt_listen.py                # Whisper STT with silence detection
 │   └── data/
 │       └── conversation_history.json
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx          # Main UI
+│   │   ├── App.jsx                  # Main UI + mic button
 │   │   └── components/
-│   │       └── Model.jsx    # Live2D renderer
+│   │       └── Model.jsx            # Live2D renderer
 │   ├── electron/
-│   │   ├── main.js          # Electron main process
-│   │   └── preload.js       # IPC bridge
+│   │   ├── main.js                  # Electron main process
+│   │   └── preload.js               # IPC bridge
 │   └── public/
-│       └── models/          # Live2D Miku model
-└── .venv_tts/               # Python virtual environment
+│       └── models/                  # Live2D Miku model
+└── .venv_tts/                       # Python virtual environment (not in git)
 ```
+
+> **Note:** `backend/voices/` directory (TTS model files) is excluded from git due to file size. Download them manually as described in Installation.
 
 ---
 
 ## Technologies Used
 
-- **AI**: Ollama (Gemma 3:4b)
-- **TTS**: Coqui TTS (Tacotron2 + HiFiGAN)
-- **Frontend**: React + Electron + Material-UI
+- **AI**: Ollama (qwen2.5:1.5b / gemma3:4b)
+- **STT**: faster-whisper (offline Whisper)
+- **TTS**: Kokoro ONNX (offline anime-style voice)
+- **Frontend**: React + Electron
 - **Live2D**: pixi-live2d-display-advanced
 - **Backend**: Python 3.11
 
@@ -302,32 +339,16 @@ newAi/
 
 ## Performance Notes
 
-- **First TTS call**: ~5-10 seconds (model loading)
-- **Subsequent calls**: ~0.5-2 seconds per sentence
-- **RAM usage**: ~2-3GB (with models loaded)
-- **Storage**: ~15GB total
+- **First TTS call**: ~2-3 seconds (model loading)
+- **Subsequent calls**: ~0.3-1 second per sentence
+- **STT**: ~1-2 seconds per transcription
+- **RAM usage**: ~2-4GB (with models loaded)
 
 ---
 
 ## Credits
 
 - **Live2D Model**: Miku Sample T04
-- **AI Model**: Google Gemma 3
-- **TTS**: Coqui TTS (Apache 2.0 license)
-
----
-
-<!--
-## License
-
-MIT License
-
----
-
-## Support
-
-For issues, please open a GitHub issue with:
-
-- Your Ubuntu version
-- Error messages
-- Steps to reproduce -->
+- **AI Model**: Ollama / Google Gemma / Alibaba Qwen
+- **TTS**: Kokoro ONNX by thewh1teagle
+- **STT**: faster-whisper by SYSTRAN
