@@ -1,5 +1,7 @@
 setting.json
 conversation_history.json
+memory.json
+start.sh
 __pycache__
 system_comands.json
 node_modules

@@ -5,8 +5,10 @@ import os
 import time
 import glob
 import subprocess
+import re
 import system_commands
 import power_commands
+import memory
 import tts_speak
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +21,9 @@ powerComands = ["SHUTDOWN", "RESTART", "SUSPEND", "SLEEP", "LOGOUT", "LOCK", "RE
 
 
 def build_system_prompt():
+    mem = memory.get_memory()
+    memory_str = json.dumps(mem, indent=2) if mem else "No memories yet"
+
     try:
         apps = []
         for f in glob.glob('/usr/share/applications/*.desktop'):
@@ -48,9 +53,13 @@ def build_system_prompt():
     return f"""You are Hatsune Miku, AI assistant on {distro}.
 User: {username}, Home: {home}
 
+WHAT YOU KNOW ABOUT THE USER:
+{memory_str}
+
 TOOLS YOU HAVE:
 - [BASH] - run ANY bash command
 - [SPEAK] - say something (max 1 sentence, no markdown)
+- [MEMORY] - store important facts about user permanently
 - notify-send - desktop notifications
 - apt - install software
 
@@ -62,18 +71,28 @@ RULES:
 2. EACH command gets its OWN [BASH] tag on its OWN line
 3. GUI apps MUST end with &
 4. BE BRIEF!
-
-CORRECT:
-[BASH]google-chrome &
-[BASH]filezilla &
-[BASH]gnome-calculator &
-
-WRONG (never do this):
-[BASH]chrome & filezilla & calculator
+5. ALWAYS use [MEMORY] when user tells you their name or preferences
 
 FORMAT:
 [SPEAK]text
-[BASH]command"""
+[BASH]command
+[MEMORY]{{"key": "value"}}
+
+EXAMPLES:
+user says "my name is Erza" →
+[SPEAK]Nice to meet you Erza!
+[MEMORY]{{"name": "Erza"}}
+
+user says "I prefer dark mode" →
+[SPEAK]Got it, I will remember that!
+[MEMORY]{{"theme": "dark"}}
+
+CORRECT BASH:
+[BASH]google-chrome &
+[BASH]filezilla &
+
+WRONG BASH:
+[BASH]chrome & filezilla &"""
 
 
 def run_and_capture(command):
@@ -132,11 +151,11 @@ for line in sys.stdin:
     output = response.message.content.strip()
     output = output.replace("[NOTE]", "").replace("[SAFETY]", "").strip()
 
-    display_output = output.replace("[BASH]", "").replace("[SPEAK]", "").strip()
+    display_output = output.replace("[BASH]", "").replace("[SPEAK]", "").replace("[MEMORY]", "").strip()
+    display_output = re.sub(r'\{[^}]*\}', '', display_output).strip()
     print(f"{display_output}", flush=True)
 
-    normalized = output.replace("[BASH]", "\n[BASH]").replace("[SPEAK]", "\n[SPEAK]")
-
+    normalized = output.replace("[BASH]", "\n[BASH]").replace("[SPEAK]", "\n[SPEAK]").replace("[MEMORY]", "\n[MEMORY]")
     bash_outputs = []
 
     for chunk in normalized.split("\n"):
@@ -162,6 +181,18 @@ for line in sys.stdin:
                 if cmd_output:
                     bash_outputs.append(f"$ {command}\n{cmd_output}")
                 time.sleep(0.2)
+
+        elif "[MEMORY]" in chunk_upper:
+            try:
+                if "[MEMORY]" in chunk:
+                    mem_str = chunk.split("[MEMORY]")[1].strip()
+                else:
+                    mem_str = chunk.split("[memory]")[1].strip()
+                mem_data = json.loads(mem_str)
+                memory.update_memory(mem_data)
+                print(f"MEMORY SAVED: {mem_data}", flush=True)
+            except Exception as e:
+                print(f"MEMORY ERROR: {e}", flush=True)
 
         elif "[SPEAK]" in chunk_upper:
             if "[SPEAK]" in chunk:
