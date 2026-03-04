@@ -3,6 +3,8 @@ import json
 import sys
 import os
 import time
+import glob
+import subprocess
 import system_commands
 import power_commands
 import tts_speak
@@ -15,62 +17,66 @@ with open(history_path, "r") as data:
 
 powerComands = ["SHUTDOWN", "RESTART", "SUSPEND", "SLEEP", "LOGOUT", "LOCK", "REBOOT"]
 
-SYSTEM_PROMPT = """You are Hatsune Miku, Ubuntu assistant.
 
-CRITICAL RULES:
-1. Be EXTREMELY brief - 1-2 sentences maximum!
-2. ALWAYS use UPPERCASE tags: [BASH] or [SPEAK]
-3. For multiple apps/commands, use ONE [BASH] tag per command on SEPARATE LINES.
-4. No markdown in [SPEAK] - plain text only!
+def build_system_prompt():
+    try:
+        apps = []
+        for f in glob.glob('/usr/share/applications/*.desktop'):
+            try:
+                name = ""
+                exec_cmd = ""
+                for line in open(f).readlines():
+                    if line.startswith('Name=') and not name:
+                        name = line.split('=', 1)[1].strip()
+                    if line.startswith('Exec=') and not exec_cmd:
+                        exec_cmd = line.split('=', 1)[1].strip().split('%')[0].strip().split()[0]
+                if name and exec_cmd:
+                    apps.append(f"{name} = {exec_cmd}")
+            except:
+                continue
+        apps_list = "\n".join(apps)
+    except:
+        apps_list = ""
 
-FORMAT:
-[BASH]command
-[SPEAK]plain text
+    try:
+        username = os.environ.get('USER', 'erza')
+        home = os.path.expanduser('~')
+        distro = open('/etc/os-release').read().split('PRETTY_NAME=')[1].split('\n')[0].strip('"')
+    except:
+        username, home, distro = 'erza', '/home/erza', 'Ubuntu'
 
-COMMAND EXAMPLES:
-"open chrome" → [BASH]google-chrome &
-"hello" → [SPEAK]Hi! I am Miku!
-"install vlc" → [BASH]sudo apt install vlc -y
-"open chrome and files" →
-[BASH]google-chrome &
-[BASH]nautilus &
-"open files" → [BASH]nautilus &
-"open system monitor" → [BASH]gnome-system-monitor &
-"open calculator" → [BASH]gnome-calculator &
-"open filezilla" → [BASH]filezilla &
-"open app center" → [BASH]snap-store &
-"open any app" → [BASH]appname &
-"open any unknown app" → [BASH]xdg-open appname &
-"open a pdf" → [BASH]xdg-open /path/to/file.pdf &
-"open folder" → [BASH]xdg-open /path/to/folder &
-"update system" → [BASH]sudo apt update && sudo apt upgrade -y
-"what time is it" → [BASH]notify-send "Time" "$(date +%H:%M)"
-"whats the date" → [BASH]notify-send "Date" "$(date +%A, %B %d %Y)"
-"disk space" → [BASH]notify-send "Disk Space" "$(df -h / | tail -1)"
-"battery" → [BASH]notify-send "Battery" "$(cat /sys/class/power_supply/BAT0/capacity)%"
-"screenshot" → [BASH]gnome-screenshot &
-"volume up" → [BASH]pactl set-sink-volume @DEFAULT_SINK@ +10%
-"volume down" → [BASH]pactl set-sink-volume @DEFAULT_SINK@ -10%
-"mute" → [BASH]pactl set-sink-mute @DEFAULT_SINK@ toggle
-"wifi on" → [BASH]nmcli radio wifi on
-"wifi off" → [BASH]nmcli radio wifi off
-"night light on" → [BASH]gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled true
-"night light off" → [BASH]gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled false
-"bluetooth on" → [BASH]rfkill unblock bluetooth
-"bluetooth off" → [BASH]rfkill block bluetooth
-"empty trash" → [BASH]rm -rf ~/.local/share/Trash/*
+    return f"""You are Hatsune Miku, AI assistant on {distro}.
+User: {username}, Home: {home}
+
+TOOLS YOU HAVE:
+- [BASH] - run ANY bash command
+- [SPEAK] - say something (max 1 sentence, no markdown)
+- notify-send - desktop notifications
+- apt - install software
+
+INSTALLED APPS (Name = binary):
+{apps_list}
 
 RULES:
-- One command per [BASH] tag
-- Each [BASH] on its own line
-- Add & for GUI apps
-- Use xdg-open for any file or unknown app
-- Use notify-send for info that should be read not spoken
-- BE BRIEF!"""
+1. NEVER write plain text outside tags
+2. EACH command gets its OWN [BASH] tag on its OWN line
+3. GUI apps MUST end with &
+4. BE BRIEF!
+
+CORRECT:
+[BASH]google-chrome &
+[BASH]filezilla &
+[BASH]gnome-calculator &
+
+WRONG (never do this):
+[BASH]chrome & filezilla & calculator
+
+FORMAT:
+[SPEAK]text
+[BASH]command"""
 
 
 def run_and_capture(command):
-    """Run command and return output"""
     try:
         result = subprocess.run(
             command,
@@ -91,18 +97,6 @@ def run_and_capture(command):
     except Exception as e:
         return str(e)
 
-
-def summarize_output(output_text, messages):
-    """Ask LLM to summarize bash output"""
-    follow_up = messages + [
-        {"role": "assistant", "content": f"[BASH ran, output below]"},
-        {"role": "user", "content": f"Command output: {output_text}\nSummarize this briefly in one sentence using [SPEAK]."}
-    ]
-    resp = chat(model='gemma3:4b', messages=follow_up)
-    return resp.message.content.strip()
-
-
-import subprocess
 
 for line in sys.stdin:
     user_prompt = line.strip()
@@ -129,14 +123,13 @@ for line in sys.stdin:
     recent_history = history[-4:] if len(history) > 4 else history
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": build_system_prompt()},
         *recent_history,
         {"role": "user", "content": user_prompt},
     ]
 
     response: ChatResponse = chat(model='gemma3:4b', messages=messages)
     output = response.message.content.strip()
-
     output = output.replace("[NOTE]", "").replace("[SAFETY]", "").strip()
 
     display_output = output.replace("[BASH]", "").replace("[SPEAK]", "").strip()
@@ -161,12 +154,10 @@ for line in sys.stdin:
 
             command = command.replace("```", "").replace("`", "").strip()
 
-            # GUI apps (end with &) - just launch, don't capture
             if command.endswith("&"):
                 system_commands.system_commands(command)
                 time.sleep(0.5)
             else:
-                # Non-GUI commands - capture output
                 cmd_output = run_and_capture(command)
                 if cmd_output:
                     bash_outputs.append(f"$ {command}\n{cmd_output}")
@@ -181,15 +172,21 @@ for line in sys.stdin:
                 tts_speak.stop_speaking()
                 tts_speak.tts_speak(text)
 
-    # If there was bash output, let LLM summarize and speak it
     if bash_outputs:
         combined = "\n".join(bash_outputs)
         print(f"BASH OUTPUT: {combined}", flush=True)
-        summary = summarize_output(combined, messages)
+
+        messages.append({"role": "assistant", "content": output})
+        messages.append({"role": "user", "content": f"Command output:\n{combined}\nBriefly summarize in [SPEAK]."})
+
+        summary_resp = chat(model='gemma3:4b', messages=messages)
+        summary = summary_resp.message.content.strip()
         summary_clean = summary.replace("[SPEAK]", "").replace("[BASH]", "").strip()
         print(f"{summary_clean}", flush=True)
         tts_speak.stop_speaking()
         tts_speak.tts_speak(summary_clean)
+
+        output = output + f"\n[BASH OUTPUT]: {combined}"
 
     if not any(tag in output.upper() for tag in ["[BASH]", "[SPEAK]"]):
         tts_speak.stop_speaking()

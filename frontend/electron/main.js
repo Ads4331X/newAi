@@ -42,9 +42,15 @@ app.whenReady().then(() => {
     mode: "text",
     pythonPath: "/home/erza/git_projects/newAi/.venv_tts/bin/python",
     pythonOptions: ["-u"],
-    scriptPath: path.join(__dirname, "../../backend"), // Path to folder
+    scriptPath: path.join(__dirname, "../../backend"),
+    env: Object.assign({}, process.env, {
+      DISPLAY: process.env.DISPLAY || ":1",
+      DBUS_SESSION_BUS_ADDRESS:
+        process.env.DBUS_SESSION_BUS_ADDRESS || "unix:path=/run/user/1000/bus",
+      XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || "/run/user/1000",
+    }),
   };
-  let pyshell = new PythonShell("main.py", options); // Just filename, scriptPath already set!
+  let pyshell = new PythonShell("main.py", options);
   pyshell.on("message", (message) => {
     console.log("FROM PYTHON:", message);
     mainWindow.webContents.send("python-response", message);
