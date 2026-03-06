@@ -39,7 +39,7 @@ function ResponsePage() {
   return (
     <Box
       sx={{
-        width: "100vw",
+        width: "100%", // change from 100vw
         height: "100vh",
         overflowY: "auto",
         overflowX: "hidden",
@@ -48,6 +48,7 @@ function ResponsePage() {
         display: "flex",
         flexDirection: "column",
         gap: 1,
+        boxSizing: "border-box", // add this
       }}
     >
       {messages.map((msg, i) => (
@@ -60,12 +61,15 @@ function ResponsePage() {
         >
           <Box
             sx={{
+              overflow: "hidden",
+              overflowWrap: "break-word",
+              wordBreak: "break-word",
               maxWidth: "75%",
               backgroundColor: msg.role === "user" ? "#7c3aed" : "white",
               color: msg.role === "user" ? "white" : "black",
               p: 1.5,
               borderRadius: 2,
-              fontSize: 16,
+              fontSize: 20,
               boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
               "& p": { margin: 0 },
             }}
