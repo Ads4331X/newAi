@@ -4,10 +4,8 @@ import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import { useState, useEffect } from "react";
 import MicIcon from "@mui/icons-material/Mic";
 import MicOffIcon from "@mui/icons-material/MicOff";
-import { ResponseBox } from "./components/ResponseBox";
 
 function App() {
-  const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [isListening, setIsListening] = useState(false);
@@ -15,24 +13,26 @@ function App() {
 
   useEffect(() => {
     if (window.electron?.ipcRenderer) {
-      const handler = (event, message) => {
+      window.electron.ipcRenderer.on("python-response", (event, message) => {
         if (message.startsWith("STT:")) {
           const text = message.slice(4).trim();
           setPrompt(text);
           setIsListening(false);
-          setResponse("");
           setLoading(true);
+          window.electron.ipcRenderer.send("user-message-to-response", text);
           sendPrompt(text);
+        } else if (
+          message.startsWith("MEMORY") ||
+          message.startsWith("BASH OUTPUT") ||
+          message.startsWith("EXECUTING:")
+        ) {
+          return;
         } else {
-          setResponse((prev) =>
-            prev ? prev + message + " \n " : message + " \n ",
-          );
           setLoading(false);
           setIsSpeaking(true);
           setTimeout(() => setIsSpeaking(false), 3000);
         }
-      };
-      window.electron.ipcRenderer.on("python-response", handler);
+      });
     }
   }, []);
 
@@ -40,8 +40,8 @@ function App() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!prompt.trim()) return;
-      setResponse("");
       setLoading(true);
+      window.electron.ipcRenderer.send("user-message-to-response", prompt);
       sendPrompt(prompt);
       setPrompt("");
     }
@@ -96,7 +96,6 @@ function App() {
             WebkitAppRegion: "no-drag",
           }}
         />
-
         <Box
           sx={{
             display: "flex",
@@ -113,7 +112,6 @@ function App() {
             <MicOffIcon fontSize="large" sx={{ color: "violet" }} />
           )}
         </Box>
-
         <Box sx={{ ml: 1, WebkitAppRegion: "drag" }}>
           {loading ? (
             <CircularProgress />
@@ -124,21 +122,6 @@ function App() {
       </Box>
 
       <Model isSpeaking={isSpeaking} />
-
-      {response && (
-        <Box
-          sx={{
-            fontSize: "18px",
-            backgroundColor: "whitesmoke",
-            p: 2,
-            borderRadius: 2,
-            maxWidth: 400,
-            WebkitAppRegion: "no-drag",
-          }}
-        >
-          <ResponseBox response={response} />
-        </Box>
-      )}
     </Box>
   );
 }

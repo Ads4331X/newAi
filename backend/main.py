@@ -151,9 +151,20 @@ for line in sys.stdin:
     output = response.message.content.strip()
     output = output.replace("[NOTE]", "").replace("[SAFETY]", "").strip()
 
-    display_output = output.replace("[BASH]", "").replace("[SPEAK]", "").replace("[MEMORY]", "").strip()
-    display_output = re.sub(r'\{[^}]*\}', '', display_output).strip()
-    print(f"{display_output}", flush=True)
+    # Extract only speak text for display
+    speak_lines = []
+    for chunk in output.split("\n"):
+        chunk = chunk.strip()
+        if "[SPEAK]" in chunk.upper():
+            if "[SPEAK]" in chunk:
+                t = chunk.split("[SPEAK]")[1].strip()
+            else:
+                t = chunk.split("[speak]")[1].strip()
+            if t:
+                speak_lines.append(t)
+
+    if speak_lines:
+        print(" ".join(speak_lines), flush=True)
 
     normalized = output.replace("[BASH]", "\n[BASH]").replace("[SPEAK]", "\n[SPEAK]").replace("[MEMORY]", "\n[MEMORY]")
     bash_outputs = []
@@ -222,6 +233,7 @@ for line in sys.stdin:
     if not any(tag in output.upper() for tag in ["[BASH]", "[SPEAK]"]):
         tts_speak.stop_speaking()
         tts_speak.tts_speak(output)
+        print(f"{output}", flush=True)
 
     history.append({'role': 'user', 'content': user_prompt})
     history.append({'role': 'assistant', 'content': output})

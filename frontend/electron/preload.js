@@ -4,12 +4,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resizeWindow: (width, height) =>
     ipcRenderer.send("resize-window", width, height),
   getPrompt: (user_prompt) => ipcRenderer.send("prompt-to-py", user_prompt),
+  closeResponse: () => ipcRenderer.send("close-response"),
 });
 
 contextBridge.exposeInMainWorld("electron", {
   ipcRenderer: {
     on: (channel, func) => {
       ipcRenderer.on(channel, (event, ...args) => func(event, ...args));
+    },
+    send: (channel, ...args) => {
+      ipcRenderer.send(channel, ...args);
     },
   },
 });
