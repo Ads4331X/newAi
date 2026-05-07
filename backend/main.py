@@ -2,7 +2,6 @@ from ollama import chat, ChatResponse
 import json
 import sys
 import os
-import time
 import glob
 import subprocess
 import re
@@ -14,10 +13,40 @@ import tts_speak
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 history_path = os.path.join(BASE_DIR, "data", "conversation_history.json")
 
-with open(history_path, "r") as f:
-    history = json.load(f)
+os.makedirs(os.path.dirname(history_path), exist_ok=True)
+try:
+    with open(history_path, "r", encoding="utf-8") as f:
+        history = json.load(f)
+        if not isinstance(history, list):
+            history = []
+except Exception:
+    history = []
 
 powerComands = ["SHUTDOWN", "RESTART", "SUSPEND", "SLEEP", "LOGOUT", "LOCK", "REBOOT"]
+_cached_apps_list = None
+
+
+def _collect_apps_once():
+    global _cached_apps_list
+    if _cached_apps_list is not None:
+        return _cached_apps_list
+    apps = []
+    for desktop_file in glob.glob('/usr/share/applications/*.desktop'):
+        try:
+            name = ""
+            exec_cmd = ""
+            with open(desktop_file, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith('Name=') and not name:
+                        name = line.split('=', 1)[1].strip()
+                    if line.startswith('Exec=') and not exec_cmd:
+                        exec_cmd = line.split('=', 1)[1].strip().split('%')[0].strip().split()[0]
+            if name and exec_cmd:
+                apps.append(f"{name} = {exec_cmd}")
+        except Exception:
+            continue
+    _cached_apps_list = "\n".join(apps)
+    return _cached_apps_list
 
 
 def build_system_prompt():
@@ -25,30 +54,15 @@ def build_system_prompt():
     memory_str = json.dumps(mem, indent=2) if mem else "No memories yet"
 
     try:
-        apps = []
-        for desktop_file in glob.glob('/usr/share/applications/*.desktop'):
-            try:
-                name = ""
-                exec_cmd = ""
-                for line in open(desktop_file).readlines():
-                    if line.startswith('Name=') and not name:
-                        name = line.split('=', 1)[1].strip()
-                    if line.startswith('Exec=') and not exec_cmd:
-                        exec_cmd = line.split('=', 1)[1].strip().split('%')[0].strip().split()[0]
-                if name and exec_cmd:
-                    apps.append(f"{name} = {exec_cmd}")
-            except:
-                continue
-        apps_list = "\n".join(apps)
-    except:
-        apps_list = ""
-
-    try:
         username = os.environ.get('USER', 'erza')
         home = os.path.expanduser('~')
-        distro = open('/etc/os-release').read().split('PRETTY_NAME=')[1].split('\n')[0].strip('"')
-    except:
+        with open('/etc/os-release', "r", encoding="utf-8", errors="ignore") as f:
+            os_release = f.read()
+        distro = os_release.split('PRETTY_NAME=')[1].split('\n')[0].strip('"')
+    except Exception:
         username, home, distro = 'erza', '/home/erza', 'Ubuntu'
+
+    apps_list = _collect_apps_once()
 
     return f"""You are Hatsune Miku, AI assistant on {distro}.
 User: {username}, Home: {home}
@@ -117,11 +131,58 @@ def run_and_capture(command):
         return str(e)
 
 
+def _extract_tag_content(chunk, tag):
+    tag_upper = f"[{tag}]"
+    chunk_strip = chunk.strip()
+    upper = chunk_strip.upper()
+    idx = upper.find(tag_upper)
+    if idx != -1:
+        return chunk_strip[idx + len(tag_upper):].strip()
+    return ""
+
+
+def _remove_memory_segments(text):
+    # Remove inline memory directives from user-visible text.
+    return re.sub(r"\[MEMORY\]\s*\{.*?\}", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+
+
+def _strip_inline_json(text):
+    decoder = json.JSONDecoder()
+    i = 0
+    out = []
+    length = len(text)
+
+    while i < length:
+        ch = text[i]
+        if ch in "{[":
+            try:
+                obj, end = decoder.raw_decode(text[i:])
+                if isinstance(obj, (dict, list)):
+                    # Skip parsed JSON fragment from user-visible output.
+                    i += end
+                    continue
+            except Exception:
+                pass
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _clean_user_visible_text(text):
+    cleaned = _remove_memory_segments(text)
+    cleaned = _strip_inline_json(cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip()
+
+
 for line in sys.stdin:
     user_prompt = line.strip()
 
     if not user_prompt:
         continue
+
+    # Always interrupt ongoing speech as soon as next prompt arrives.
+    tts_speak.stop_speaking()
 
     if user_prompt.upper() in ["QUIT", "EXIT", "Q", "E"]:
         print("Exiting...", flush=True)
@@ -153,17 +214,14 @@ for line in sys.stdin:
     response: ChatResponse = chat(model='gemma3:4b', messages=messages)
     output = response.message.content.strip()
     output = output.replace("[NOTE]", "").replace("[SAFETY]", "").strip()
+    output_user_visible = _clean_user_visible_text(output)
 
     speak_lines = []
-    for chunk in output.split("\n"):
-        chunk = chunk.strip()
-        if "[SPEAK]" in chunk.upper():
-            if "[SPEAK]" in chunk:
-                t = chunk.split("[SPEAK]")[1].strip()
-            else:
-                t = chunk.split("[speak]")[1].strip()
-            if t:
-                speak_lines.append(t)
+    for chunk in output_user_visible.split("\n"):
+        t = _extract_tag_content(chunk, "SPEAK")
+        if t:
+            t = _clean_user_visible_text(t)
+            speak_lines.append(t)
 
     if speak_lines:
         print(" ".join(speak_lines), flush=True)
@@ -188,60 +246,51 @@ for line in sys.stdin:
 
             if command.endswith("&"):
                 system_commands.system_commands(command)
-                time.sleep(0.5)
             else:
                 cmd_output = run_and_capture(command)
                 if cmd_output:
                     bash_outputs.append(f"$ {command}\n{cmd_output}")
-                time.sleep(0.2)
 
         elif "[MEMORY]" in chunk_upper:
             try:
-                if "[MEMORY]" in chunk:
-                    mem_str = chunk.split("[MEMORY]")[1].strip()
-                else:
-                    mem_str = chunk.split("[memory]")[1].strip()
+                mem_str = _extract_tag_content(chunk, "MEMORY")
                 mem_data = json.loads(mem_str)
                 memory.update_memory(mem_data)
-                print(f"MEMORY SAVED: {mem_data}", flush=True)
             except Exception as e:
                 print(f"MEMORY ERROR: {e}", flush=True)
 
         elif "[SPEAK]" in chunk_upper:
-            if "[SPEAK]" in chunk:
-                text = chunk.split("[SPEAK]")[1].strip()
-            else:
-                text = chunk.split("[speak]")[1].strip()
+            text = _extract_tag_content(chunk, "SPEAK")
             if text:
-                tts_speak.stop_speaking()
-                tts_speak.tts_speak(text)
+                text = _clean_user_visible_text(text)
+                if text:
+                    tts_speak.tts_speak_async(text)
 
     if bash_outputs:
         combined = "\n".join(bash_outputs)
         print(f"BASH OUTPUT: {combined}", flush=True)
-
-        messages.append({"role": "assistant", "content": output})
-        messages.append({"role": "user", "content": f"Command output:\n{combined}\nBriefly summarize in [SPEAK]."})
-
-        summary_resp = chat(model='gemma3:4b', messages=messages)
-        summary = summary_resp.message.content.strip()
-        summary_clean = summary.replace("[SPEAK]", "").replace("[BASH]", "").strip()
-        print(f"{summary_clean}", flush=True)
-        tts_speak.stop_speaking()
-        tts_speak.tts_speak(summary_clean)
+        summary_clean = "Command finished. I have shown the output on screen."
+        print(summary_clean, flush=True)
+        tts_speak.tts_speak_async(summary_clean)
 
         output = output + f"\n[BASH OUTPUT]: {combined}"
 
     if not any(tag in output.upper() for tag in ["[BASH]", "[SPEAK]"]):
-        tts_speak.stop_speaking()
-        tts_speak.tts_speak(output)
-        print(f"{output}", flush=True)
+        clean_output = _clean_user_visible_text(output_user_visible)
+        if clean_output:
+            tts_speak.tts_speak_async(clean_output)
+            print(clean_output, flush=True)
+
+    # Save only user-facing assistant text to history (no [MEMORY]/[BASH] tags).
+    assistant_history_text = " ".join(speak_lines).strip()
+    if not assistant_history_text:
+        assistant_history_text = re.sub(r"\[(SPEAK|MEMORY|BASH)\]", "", output_user_visible, flags=re.IGNORECASE).strip()
 
     history.append({'role': 'user', 'content': user_prompt})
-    history.append({'role': 'assistant', 'content': output})
+    history.append({'role': 'assistant', 'content': assistant_history_text})
 
     if len(history) > 8:
         history = history[-8:]
 
-    with open(history_path, "w") as f:
+    with open(history_path, "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)

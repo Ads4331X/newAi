@@ -14,15 +14,20 @@ kokoro = Kokoro(
 )
 VOICE = "af_bella"
 
-# Global stop flag
 _stop_event = threading.Event()
 _aplay_process = None
+_speak_queue = queue.Queue()
+_worker_thread = None
+_worker_lock = threading.Lock()
 
 def stop_speaking():
     global _aplay_process
     _stop_event.set()
     if _aplay_process:
-        _aplay_process.terminate()
+        try:
+            _aplay_process.terminate()
+        except Exception:
+            pass
 
 def clean_text(text):
     text = text.replace("**", "").replace("*", "").replace("`", "").replace("#", "")
@@ -55,11 +60,7 @@ def player_worker(play_queue):
             pass
         play_queue.task_done()
 
-def tts_speak(text):
-    global _stop_event
-    # Reset stop flag for new speech
-    _stop_event.clear()
-
+def _tts_speak_blocking(text):
     text = clean_text(text)
     if not text:
         return
@@ -79,3 +80,36 @@ def tts_speak(text):
         play_queue.put((tmp.name,))
     play_queue.put(None)
     player_thread.join()
+
+def _speak_worker():
+    while True:
+        text = _speak_queue.get()
+        if text is None:
+            _speak_queue.task_done()
+            continue
+        _stop_event.clear()
+        _tts_speak_blocking(text)
+        _speak_queue.task_done()
+
+def _ensure_worker():
+    global _worker_thread
+    with _worker_lock:
+        if _worker_thread is None or not _worker_thread.is_alive():
+            _worker_thread = threading.Thread(target=_speak_worker, daemon=True)
+            _worker_thread.start()
+
+def tts_speak(text):
+    _stop_event.clear()
+    _tts_speak_blocking(text)
+
+def tts_speak_async(text):
+    stop_speaking()
+    _ensure_worker()
+    # Drop stale queued messages so only latest response is spoken.
+    while True:
+        try:
+            _speak_queue.get_nowait()
+            _speak_queue.task_done()
+        except queue.Empty:
+            break
+    _speak_queue.put(text)

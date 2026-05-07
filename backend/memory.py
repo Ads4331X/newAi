@@ -6,7 +6,7 @@ MEMORY_FILE = os.path.join(BASE_DIR, "data", "memory.json")
 
 def load_memory():
     if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "r") as f:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
             try:
                 return json.load(f)
             except:
@@ -14,10 +14,13 @@ def load_memory():
     return {}
 
 def save_memory(memory):
-    with open(MEMORY_FILE, "w") as f:
+    os.makedirs(os.path.dirname(MEMORY_FILE), exist_ok=True)
+    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
         json.dump(memory, f, indent=2)
 
 def update_memory(new_data):
+    if not isinstance(new_data, dict):
+        return
     memory = load_memory()
     memory.update(new_data)
     save_memory(memory)

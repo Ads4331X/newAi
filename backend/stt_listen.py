@@ -2,6 +2,7 @@ import numpy as np
 import sounddevice as sd
 import tempfile
 import wave
+import os
 from faster_whisper import WhisperModel
 
 model = WhisperModel("base", device="cpu", compute_type="int8")
@@ -52,6 +53,12 @@ def listen_and_transcribe():
     path = record_until_silence()
     if not path:
         return ""
-    segments, _ = model.transcribe(path, language="en")
-    result = " ".join(s.text for s in segments).strip()
-    return result
+    try:
+        segments, _ = model.transcribe(path, language="en", vad_filter=True, beam_size=1)
+        result = " ".join(s.text for s in segments).strip()
+        return result
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
