@@ -1,35 +1,74 @@
 import { Box } from "@mui/material";
-import ReactMarkDown from "react-markdown";
 import { useState, useEffect, useRef } from "react";
+import { ResponseBox } from "./components/ResponseBox";
 
 function ResponsePage() {
   const [messages, setMessages] = useState([]);
   const bottomRef = useRef();
 
   useEffect(() => {
-    if (window.electron?.ipcRenderer) {
-      window.electron.ipcRenderer.on("load-history", (event, history) => {
-        setMessages(history);
-      });
+    if (!window.electron?.ipcRenderer) return;
 
-      window.electron.ipcRenderer.on("python-response", (event, message) => {
+    const dedupeMessages = (list) => {
+      const deduped = [];
+      for (const msg of list) {
+        const last = deduped[deduped.length - 1];
+        if (last?.role === msg.role && last?.content === msg.content) continue;
+        deduped.push(msg);
+      }
+      return deduped;
+    };
+
+    const offLoadHistory = window.electron.ipcRenderer.on(
+      "load-history",
+      (event, history) => {
+        if (!Array.isArray(history)) return;
+        setMessages((prev) => {
+          const normalizedHistory = dedupeMessages(history);
+          if (prev.length === 0) return normalizedHistory;
+          if (normalizedHistory.length >= prev.length) return normalizedHistory;
+
+          // If backend sends a shorter snapshot, preserve newer in-memory items.
+          return dedupeMessages([
+            ...normalizedHistory,
+            ...prev.slice(normalizedHistory.length),
+          ]);
+        });
+      },
+    );
+
+    const offPythonResponse = window.electron.ipcRenderer.on(
+      "python-response",
+      (event, message) => {
         if (
+          message.startsWith("STT:") ||
           message.startsWith("MEMORY") ||
           message.startsWith("BASH OUTPUT") ||
           message.startsWith("EXECUTING:")
-        )
+        ) {
           return;
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last?.content === message) return prev;
-          return [...prev, { role: "assistant", content: message }];
-        });
-      });
+        }
 
-      window.electron.ipcRenderer.on("user-message", (event, text) => {
-        setMessages((prev) => [...prev, { role: "user", content: text }]);
-      });
-    }
+        setMessages((prev) =>
+          dedupeMessages([...prev, { role: "assistant", content: message }]),
+        );
+      },
+    );
+
+    const offUserMessage = window.electron.ipcRenderer.on(
+      "user-message",
+      (event, text) => {
+        setMessages((prev) =>
+          dedupeMessages([...prev, { role: "user", content: text }]),
+        );
+      },
+    );
+
+    return () => {
+      offLoadHistory?.();
+      offPythonResponse?.();
+      offUserMessage?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -39,7 +78,7 @@ function ResponsePage() {
   return (
     <Box
       sx={{
-        width: "100%", // change from 100vw
+        width: "100%",
         height: "100vh",
         overflowY: "auto",
         overflowX: "hidden",
@@ -48,7 +87,7 @@ function ResponsePage() {
         display: "flex",
         flexDirection: "column",
         gap: 1,
-        boxSizing: "border-box", // add this
+        boxSizing: "border-box",
       }}
     >
       {messages.map((msg, i) => (
@@ -59,23 +98,7 @@ function ResponsePage() {
             justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
           }}
         >
-          <Box
-            sx={{
-              overflow: "hidden",
-              overflowWrap: "break-word",
-              wordBreak: "break-word",
-              maxWidth: "75%",
-              backgroundColor: msg.role === "user" ? "#7c3aed" : "white",
-              color: msg.role === "user" ? "white" : "black",
-              p: 1.5,
-              borderRadius: 2,
-              fontSize: 20,
-              boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
-              "& p": { margin: 0 },
-            }}
-          >
-            <ReactMarkDown>{msg.content}</ReactMarkDown>
-          </Box>
+          <ResponseBox response={msg.content} role={msg.role} />
         </Box>
       ))}
       <div ref={bottomRef} />

@@ -4,18 +4,27 @@ import { Live2DModel } from "pixi-live2d-display-lipsyncpatch";
 
 window.PIXI = PIXI;
 
-export function Model({ isSpeaking }) {
+export function Model({ isSpeaking, isThinking }) {
   const containerRef = useRef(null);
   const modelRef = useRef(null);
 
+  // Handle motion based on state
   useEffect(() => {
     if (!modelRef.current) return;
     if (isSpeaking) {
       modelRef.current.motion("Tap");
-    } else {
+    } else if (isThinking) {
       modelRef.current.motion("Idle");
     }
-  }, [isSpeaking]);
+  }, [isSpeaking, isThinking]);
+
+  // Sync to model ref for ticker access
+  useEffect(() => {
+    if (modelRef.current) {
+      modelRef.current._isSpeaking = isSpeaking;
+      modelRef.current._isThinking = isThinking;
+    }
+  }, [isSpeaking, isThinking]);
 
   useEffect(() => {
     const app = new PIXI.Application({
@@ -33,9 +42,20 @@ export function Model({ isSpeaking }) {
     }
 
     const modelUrl = "/models/miku_pro_jp/runtime/miku_sample_t04.model3.json";
+    let isDisposed = false;
+    let idleInterval = null;
+    let lipSyncInterval = null;
+    let mouthOpen = false;
+    let tickerHandler = null;
+    let contextMenuHandler = null;
 
     Live2DModel.from(modelUrl)
       .then((model) => {
+        if (isDisposed) {
+          model.destroy?.();
+          return;
+        }
+
         app.stage.addChild(model);
         modelRef.current = model;
 
@@ -65,23 +85,24 @@ export function Model({ isSpeaking }) {
           }
         });
 
-        app.view.addEventListener("contextmenu", (e) => e.preventDefault());
+        contextMenuHandler = (e) => e.preventDefault();
+        app.view.addEventListener("contextmenu", contextMenuHandler);
 
         if (window.electronAPI) {
           window.electronAPI.resizeWindow(mWidth * 0.45, mHeight * 0.65);
         }
 
-        // Start idle loop - play random idle every 8 seconds
-        const idleInterval = setInterval(() => {
-          if (!isSpeaking && modelRef.current) {
+        // Idle loop every 8 seconds
+        idleInterval = setInterval(() => {
+          if (
+            !modelRef.current?._isSpeaking &&
+            !modelRef.current?._isThinking
+          ) {
             model.motion("Idle");
           }
         }, 8000);
 
-        // Lipsync - animate mouth when speaking
-        let lipSyncInterval = null;
-        let mouthOpen = false;
-
+        // Lipsync
         const startLipSync = () => {
           lipSyncInterval = setInterval(() => {
             mouthOpen = !mouthOpen;
@@ -104,33 +125,31 @@ export function Model({ isSpeaking }) {
           );
         };
 
-        app.ticker.add(() => {
+        tickerHandler = () => {
           if (modelRef.current?._isSpeaking && !lipSyncInterval) {
             startLipSync();
           } else if (!modelRef.current?._isSpeaking && lipSyncInterval) {
             stopLipSync();
           }
-        });
-
-        return () => {
-          clearInterval(idleInterval);
-          stopLipSync();
         };
+        app.ticker.add(tickerHandler);
       })
       .catch((err) => {
         console.error("Error loading Live2D model:", err);
       });
 
     return () => {
+      isDisposed = true;
+      if (idleInterval) clearInterval(idleInterval);
+      if (lipSyncInterval) clearInterval(lipSyncInterval);
+      if (tickerHandler) app.ticker.remove(tickerHandler);
+      if (contextMenuHandler) {
+        app.view.removeEventListener("contextmenu", contextMenuHandler);
+      }
+      modelRef.current = null;
       app.destroy(true, { children: true, texture: true });
     };
   }, []);
-
-  useEffect(() => {
-    if (modelRef.current) {
-      modelRef.current._isSpeaking = isSpeaking;
-    }
-  }, [isSpeaking]);
 
   return <div ref={containerRef} style={{ lineHeight: 0 }} />;
 }

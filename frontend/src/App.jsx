@@ -10,15 +10,20 @@ function App() {
   const [prompt, setPrompt] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
 
   useEffect(() => {
-    if (window.electron?.ipcRenderer) {
-      window.electron.ipcRenderer.on("python-response", (event, message) => {
+    if (!window.electron?.ipcRenderer) return;
+
+    const offPythonResponse = window.electron.ipcRenderer.on(
+      "python-response",
+      (event, message) => {
         if (message.startsWith("STT:")) {
           const text = message.slice(4).trim();
           setPrompt(text);
           setIsListening(false);
           setLoading(true);
+          setIsThinking(true);
           window.electron.ipcRenderer.send("user-message-to-response", text);
           sendPrompt(text);
         } else if (
@@ -29,11 +34,16 @@ function App() {
           return;
         } else {
           setLoading(false);
+          setIsThinking(false);
           setIsSpeaking(true);
           setTimeout(() => setIsSpeaking(false), 3000);
         }
-      });
-    }
+      },
+    );
+
+    return () => {
+      offPythonResponse?.();
+    };
   }, []);
 
   const handleKeyDown = (e) => {
@@ -41,6 +51,7 @@ function App() {
       e.preventDefault();
       if (!prompt.trim()) return;
       setLoading(true);
+      setIsThinking(true);
       window.electron.ipcRenderer.send("user-message-to-response", prompt);
       sendPrompt(prompt);
       setPrompt("");
@@ -121,7 +132,7 @@ function App() {
         </Box>
       </Box>
 
-      <Model isSpeaking={isSpeaking} />
+      <Model isSpeaking={isSpeaking} isThinking={isThinking} />
     </Box>
   );
 }

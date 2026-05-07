@@ -14,8 +14,8 @@ import tts_speak
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 history_path = os.path.join(BASE_DIR, "data", "conversation_history.json")
 
-with open(history_path, "r") as data:
-    history = json.load(data)
+with open(history_path, "r") as f:
+    history = json.load(f)
 
 powerComands = ["SHUTDOWN", "RESTART", "SUSPEND", "SLEEP", "LOGOUT", "LOCK", "REBOOT"]
 
@@ -26,11 +26,11 @@ def build_system_prompt():
 
     try:
         apps = []
-        for f in glob.glob('/usr/share/applications/*.desktop'):
+        for desktop_file in glob.glob('/usr/share/applications/*.desktop'):
             try:
                 name = ""
                 exec_cmd = ""
-                for line in open(f).readlines():
+                for line in open(desktop_file).readlines():
                     if line.startswith('Name=') and not name:
                         name = line.split('=', 1)[1].strip()
                     if line.startswith('Exec=') and not exec_cmd:
@@ -131,12 +131,15 @@ for line in sys.stdin:
         power_commands.power_commands(user_prompt.upper())
         print("Power command executed", flush=True)
         continue
-
+    
     if user_prompt == "MIC_START":
         import stt_listen
         text = stt_listen.listen_and_transcribe()
         if text:
             print(f"STT:{text}", flush=True)
+        continue
+    if user_prompt == "STOP_SPEAKING":
+        tts_speak.stop_speaking()
         continue
 
     recent_history = history[-4:] if len(history) > 4 else history
@@ -151,7 +154,6 @@ for line in sys.stdin:
     output = response.message.content.strip()
     output = output.replace("[NOTE]", "").replace("[SAFETY]", "").strip()
 
-    # Extract only speak text for display
     speak_lines = []
     for chunk in output.split("\n"):
         chunk = chunk.strip()
@@ -241,5 +243,5 @@ for line in sys.stdin:
     if len(history) > 8:
         history = history[-8:]
 
-    with open(history_path, "w") as data:
-        json.dump(history, data, indent=2)
+    with open(history_path, "w") as f:
+        json.dump(history, f, indent=2)

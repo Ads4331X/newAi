@@ -8,7 +8,93 @@ app.commandLine.appendSwitch("log-level", "3");
 
 let mainWindow;
 let responseWindow;
+let pyshell;
+let responseReady = false;
+const pendingResponseEvents = [];
 const preloadPath = path.resolve(__dirname, "preload.js");
+const preferredRendererUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+let activeRendererUrl = preferredRendererUrl;
+const historyPath = path.join(
+  __dirname,
+  "../../backend/data/conversation_history.json",
+);
+
+function getRendererCandidates() {
+  const candidates = [preferredRendererUrl];
+  for (let port = 5173; port <= 5183; port += 1) {
+    candidates.push(`http://localhost:${port}`);
+  }
+  return [...new Set(candidates)];
+}
+
+function loadWindowWithFallback(win, hash = "") {
+  const candidates = getRendererCandidates();
+  const wc = win.webContents;
+  let index = 0;
+  let loaded = false;
+
+  const tryLoad = () => {
+    if (!win || win.isDestroyed() || loaded) return;
+    const url = `${candidates[index % candidates.length]}${hash}`;
+    index += 1;
+    win.loadURL(url).catch(() => {
+      setTimeout(tryLoad, 300);
+    });
+  };
+
+  const onFailLoad = () => {
+    if (loaded) return;
+    setTimeout(tryLoad, 300);
+  };
+
+  const onDidFinishLoad = () => {
+    if (win.isDestroyed()) return;
+    loaded = true;
+    activeRendererUrl = wc.getURL().split("#")[0];
+    wc.removeListener("did-fail-load", onFailLoad);
+  };
+
+  wc.on("did-fail-load", onFailLoad);
+  wc.on("did-finish-load", onDidFinishLoad);
+  win.on("closed", () => {
+    loaded = true;
+  });
+
+  tryLoad();
+}
+
+function loadHistory() {
+  try {
+    return JSON.parse(fs.readFileSync(historyPath, "utf8"));
+  } catch (e) {
+    return [];
+  }
+}
+
+function sendToResponse(channel, data) {
+  if (!responseWindow || responseWindow.isDestroyed()) return;
+
+  if (!responseReady) {
+    pendingResponseEvents.push({ channel, data });
+    return;
+  }
+
+  responseWindow.webContents.send(channel, data);
+}
+
+function flushResponseEvents() {
+  if (!responseWindow || responseWindow.isDestroyed() || !responseReady) return;
+  while (pendingResponseEvents.length > 0) {
+    const event = pendingResponseEvents.shift();
+    responseWindow.webContents.send(event.channel, event.data);
+  }
+}
+
+function sendToMain(channel, data) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, data);
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -25,15 +111,19 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  mainWindow.loadURL("http://localhost:5173");
+  loadWindowWithFallback(mainWindow);
   mainWindow.setIgnoreMouseEvents(false);
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 }
 
 function createResponseWindow() {
   if (responseWindow && !responseWindow.isDestroyed()) return;
+  responseReady = false;
   responseWindow = new BrowserWindow({
     width: 450,
-    height: 300,
+    height: 500,
     frame: true,
     autoHideMenuBar: true,
     alwaysOnTop: true,
@@ -45,24 +135,31 @@ function createResponseWindow() {
       nodeIntegration: false,
     },
   });
-  responseWindow.loadURL("http://localhost:5173/#response");
-
+  loadWindowWithFallback(responseWindow, "#response");
   responseWindow.webContents.on("did-finish-load", () => {
-    const historyPath = path.join(
-      __dirname,
-      "../../backend/data/conversation_history.json",
-    );
-    try {
-      const history = JSON.parse(fs.readFileSync(historyPath, "utf8"));
-      responseWindow.webContents.send("load-history", history);
-    } catch (e) {}
+    responseReady = true;
+    flushResponseEvents();
+    // Keep both windows aligned after whichever Vite port wins.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const currentMainUrl = mainWindow.webContents.getURL().split("#")[0];
+      if (currentMainUrl !== activeRendererUrl) {
+        mainWindow.loadURL(activeRendererUrl);
+      }
+    }
+    sendToResponse("load-history", loadHistory());
+  });
+  responseWindow.on("focus", () => {
+    sendToResponse("load-history", loadHistory());
+  });
+  responseWindow.on("closed", () => {
+    responseReady = false;
+    pendingResponseEvents.length = 0;
+    responseWindow = null;
   });
 }
 
 ipcMain.on("resize-window", (event, width, height) => {
-  if (mainWindow) {
-    mainWindow.setSize(Math.round(width), Math.round(height));
-  }
+  if (mainWindow) mainWindow.setSize(Math.round(width), Math.round(height));
 });
 
 ipcMain.on("close-response", () => {
@@ -72,8 +169,13 @@ ipcMain.on("close-response", () => {
   }
 });
 
+ipcMain.on("stop-speaking", () => {
+  if (pyshell) pyshell.send("STOP_SPEAKING");
+});
+
 app.whenReady().then(() => {
   createWindow();
+  createResponseWindow();
 
   let options = {
     mode: "text",
@@ -88,10 +190,10 @@ app.whenReady().then(() => {
     }),
   };
 
-  let pyshell = new PythonShell("main.py", options);
+  pyshell = new PythonShell("main.py", options);
   pyshell.on("message", (message) => {
     console.log("FROM PYTHON:", message);
-    mainWindow.webContents.send("python-response", message);
+    sendToMain("python-response", message);
 
     if (
       !message.startsWith("STT:") &&
@@ -99,37 +201,31 @@ app.whenReady().then(() => {
       !message.startsWith("BASH OUTPUT") &&
       !message.startsWith("EXECUTING:")
     ) {
-      if (responseWindow && !responseWindow.isDestroyed()) {
-        responseWindow.webContents.send("python-response", message);
-      }
+      sendToResponse("python-response", message);
     }
   });
 
-  pyshell.on("error", (err) => {
-    console.error("Python error:", err);
-  });
+  pyshell.on("error", (err) => console.error("Python error:", err));
 
   ipcMain.on("user-message-to-response", (event, text) => {
-    createResponseWindow();
-    setTimeout(() => {
-      if (responseWindow && !responseWindow.isDestroyed()) {
-        responseWindow.webContents.send("user-message", text);
-      }
-    }, 600);
+    sendToResponse("user-message", text);
   });
 
   ipcMain.on("prompt-to-py", (event, user_prompt) => {
-    createResponseWindow();
-    setTimeout(() => {
-      if (responseWindow && !responseWindow.isDestroyed()) {
-        responseWindow.webContents.send("user-message", user_prompt);
-      }
-    }, 600);
-    pyshell.send(user_prompt);
+    if (pyshell) pyshell.send(user_prompt);
   });
 });
 
-app.commandLine.appendSwitch("enable-features", "OnDeviceWebSpeech");
+app.on("before-quit", () => {
+  if (pyshell) {
+    try {
+      pyshell.terminate();
+    } catch (err) {
+      console.error("Python terminate error:", err);
+    }
+    pyshell = null;
+  }
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
