@@ -1,10 +1,11 @@
-from ollama import chat, ChatResponse
 import json
 import sys
 import os
 import glob
 import subprocess
 import re
+import urllib.request
+import urllib.error
 import system_commands
 import power_commands
 import memory
@@ -12,6 +13,9 @@ import tts_speak
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 history_path = os.path.join(BASE_DIR, "data", "conversation_history.json")
+FAST_HISTORY_TURNS = 2
+MAX_MEMORY_KEYS = 12
+MAX_APPS_IN_PROMPT = 120
 
 os.makedirs(os.path.dirname(history_path), exist_ok=True)
 try:
@@ -24,6 +28,126 @@ except Exception:
 
 powerComands = ["SHUTDOWN", "RESTART", "SUSPEND", "SLEEP", "LOGOUT", "LOCK", "REBOOT"]
 _cached_apps_list = None
+_cached_user_context = None
+
+
+def _load_env_file(env_path):
+    if not os.path.exists(env_path):
+        return
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception:
+        pass
+
+
+def _init_env():
+    root_env = os.path.join(os.path.dirname(BASE_DIR), ".env")
+    backend_env = os.path.join(BASE_DIR, ".env")
+    _load_env_file(root_env)
+    _load_env_file(backend_env)
+
+
+def openrouter_chat(messages):
+    api_key = os.environ.get("OPEN_ROUTER_API_KEY", "").strip()
+    model = os.environ.get("OPEN_ROUTER_AI_MODEL", "openai/gpt-oss-20b:free").strip()
+    if not api_key:
+        return "[SPEAK]OpenRouter API key is missing. Please set OPEN_ROUTER_API_KEY in .env."
+
+    timeout_seconds = float(os.environ.get("OPEN_ROUTER_TIMEOUT", "12"))
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "max_tokens": 180,
+        "stream": False,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url="https://openrouter.ai/api/v1/chat/completions",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost",
+            "X-Title": "newAi-assistant",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            body = resp.read().decode("utf-8")
+        parsed = json.loads(body)
+        choices = parsed.get("choices") or []
+        if not choices:
+            return "[SPEAK]OpenRouter returned no choices."
+
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+
+        if isinstance(content, str):
+            text = content.strip()
+            if text:
+                return text
+
+        # Some models return content as structured parts, or null when only
+        # reasoning/tool fields are present.
+        if isinstance(content, dict):
+            text_val = content.get("text")
+            if isinstance(text_val, str) and text_val.strip():
+                return text_val.strip()
+
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict):
+                    text_val = part.get("text")
+                    if isinstance(text_val, str) and text_val.strip():
+                        text_parts.append(text_val.strip())
+                elif isinstance(part, str) and part.strip():
+                    text_parts.append(part.strip())
+            if text_parts:
+                return "\n".join(text_parts).strip()
+
+        # Additional compatibility fallbacks across providers.
+        choice_text = choices[0].get("text")
+        if isinstance(choice_text, str) and choice_text.strip():
+            return choice_text.strip()
+
+        delta_content = (choices[0].get("delta") or {}).get("content")
+        if isinstance(delta_content, str) and delta_content.strip():
+            return delta_content.strip()
+
+        output_text = parsed.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text.strip()
+
+        error_obj = parsed.get("error")
+        if isinstance(error_obj, dict):
+            message_text = error_obj.get("message")
+            if isinstance(message_text, str) and message_text.strip():
+                return f"[SPEAK]OpenRouter error: {message_text.strip()}"
+
+        # Fallback to avoid crashing on null content responses.
+        return "[SPEAK]I received an empty response from OpenRouter. Please try again."
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")
+        return f"[SPEAK]OpenRouter request failed with status {e.code}. {detail[:300]}"
+    except Exception as e:
+        return f"[SPEAK]OpenRouter request failed: {str(e)}"
+
+
+_init_env()
 
 
 def _collect_apps_once():
@@ -45,29 +169,50 @@ def _collect_apps_once():
                 apps.append(f"{name} = {exec_cmd}")
         except Exception:
             continue
-    _cached_apps_list = "\n".join(apps)
+    _cached_apps_list = "\n".join(apps[:MAX_APPS_IN_PROMPT])
     return _cached_apps_list
+
+
+def _get_user_context_once():
+    global _cached_user_context
+    if _cached_user_context is not None:
+        return _cached_user_context
+
+    try:
+        username = os.environ.get("USER", "erza")
+        home = os.path.expanduser("~")
+        with open("/etc/os-release", "r", encoding="utf-8", errors="ignore") as f:
+            os_release = f.read()
+        distro = os_release.split("PRETTY_NAME=")[1].split("\n")[0].strip('"')
+    except Exception:
+        username, home, distro = "erza", "/home/erza", "Ubuntu"
+
+    _cached_user_context = (username, home, distro)
+    return _cached_user_context
+
+
+def _compact_memory_for_prompt(mem):
+    if not isinstance(mem, dict) or not mem:
+        return "{}"
+    compact = {}
+    for idx, (key, value) in enumerate(mem.items()):
+        if idx >= MAX_MEMORY_KEYS:
+            break
+        compact[key] = value
+    return json.dumps(compact, separators=(",", ":"))
 
 
 def build_system_prompt():
     mem = memory.get_memory()
-    memory_str = json.dumps(mem, indent=2) if mem else "No memories yet"
-
-    try:
-        username = os.environ.get('USER', 'erza')
-        home = os.path.expanduser('~')
-        with open('/etc/os-release', "r", encoding="utf-8", errors="ignore") as f:
-            os_release = f.read()
-        distro = os_release.split('PRETTY_NAME=')[1].split('\n')[0].strip('"')
-    except Exception:
-        username, home, distro = 'erza', '/home/erza', 'Ubuntu'
+    memory_str = _compact_memory_for_prompt(mem)
+    username, home, distro = _get_user_context_once()
 
     apps_list = _collect_apps_once()
 
-    return f"""You are Hatsune Miku, AI assistant on {distro}.
+    return f"""You are Hatsune Miku, a fast AI assistant on {distro}.
 User: {username}, Home: {home}
 
-WHAT YOU KNOW ABOUT THE USER:
+USER MEMORY (JSON):
 {memory_str}
 
 TOOLS YOU HAVE:
@@ -81,11 +226,11 @@ INSTALLED APPS (Name = binary):
 {apps_list}
 
 RULES:
-1. NEVER write plain text outside tags
-2. EACH command gets its OWN [BASH] tag on its OWN line
-3. GUI apps MUST end with &
-4. BE BRIEF!
-5. ALWAYS use [MEMORY] when user tells you their name or preferences
+1. Output only tags.
+2. Keep replies brief.
+3. One [BASH] command per line.
+4. GUI apps must end with &.
+5. Use [MEMORY] for important user facts/preferences.
 
 FORMAT:
 [SPEAK]text
@@ -116,7 +261,7 @@ def run_and_capture(command):
             shell=True,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=8,
             env={
                 **os.environ,
                 'DISPLAY': os.environ.get('DISPLAY', ':1'),
@@ -203,7 +348,7 @@ for line in sys.stdin:
         tts_speak.stop_speaking()
         continue
 
-    recent_history = history[-4:] if len(history) > 4 else history
+    recent_history = history[-FAST_HISTORY_TURNS:] if len(history) > FAST_HISTORY_TURNS else history
 
     messages = [
         {"role": "system", "content": build_system_prompt()},
@@ -211,8 +356,7 @@ for line in sys.stdin:
         {"role": "user", "content": user_prompt},
     ]
 
-    response: ChatResponse = chat(model='gemma3:4b', messages=messages)
-    output = response.message.content.strip()
+    output = openrouter_chat(messages)
     output = output.replace("[NOTE]", "").replace("[SAFETY]", "").strip()
     output_user_visible = _clean_user_visible_text(output)
 
